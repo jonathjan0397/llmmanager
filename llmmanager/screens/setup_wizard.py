@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import Screen
-from textual.widgets import Button, Checkbox, Label, Static
+from textual.widgets import Button, Checkbox, Input, Label, Static
 
 from llmmanager.widgets.log_view import LogView
 
@@ -35,6 +35,12 @@ class SetupWizardScreen(Screen):
                 yield Checkbox("vLLM",      value=False, id="install-vllm")
                 yield Checkbox("LM Studio", value=False, id="install-lmstudio")
 
+                yield Label("Sudo password:", classes="form-label")
+                yield Input(
+                    placeholder="required for system install",
+                    password=True,
+                    id="sudo-password-input",
+                )
                 yield Button("Run Pre-flight Checks", id="btn-preflight", variant="default")
                 yield Button("Install Selected",      id="btn-install-all", variant="primary", disabled=True)
                 yield Button("Skip Wizard",           id="btn-skip", variant="default")
@@ -113,6 +119,7 @@ class SetupWizardScreen(Screen):
         app: LLMManagerApp = self.app  # type: ignore[assignment]
         log = self.query_one("#wizard-log", LogView)
         log.clear_log()
+        sudo_pw = self.query_one("#sudo-password-input", Input).value
 
         for server_type, checkbox_id in [
             ("ollama", "#install-ollama"),
@@ -125,7 +132,7 @@ class SetupWizardScreen(Screen):
                 continue
             log.append_line(f"=== Installing {server.display_name} ===")
             try:
-                async for line in server.install():
+                async for line in server.install(sudo_password=sudo_pw):
                     log.append_line(line)
             except Exception as exc:
                 log.append_line(f"ERROR: {exc}")

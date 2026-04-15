@@ -168,7 +168,7 @@ class LMStudioServer(AbstractServer):
     async def list_available_versions(self) -> list[str]:
         return []
 
-    async def install(self, version: str = "latest") -> AsyncIterator[str]:
+    async def install(self, version: str = "latest", sudo_password: str = "") -> AsyncIterator[str]:
         yield "LM Studio cannot be installed automatically."
         yield "Download from: https://lmstudio.ai"
         yield "After installing, open LM Studio and enable 'Local Server' in settings."

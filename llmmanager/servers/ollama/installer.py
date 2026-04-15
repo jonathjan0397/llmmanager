@@ -48,11 +48,19 @@ async def list_available_versions() -> list[str]:
         return []
 
 
-async def install(version: str = "latest") -> AsyncIterator[str]:
+async def install(version: str = "latest", sudo_password: str = "") -> AsyncIterator[str]:
     """
     Stream installation progress lines.
     Uses the official install script from ollama.ai.
+
+    sudo_password: if provided, injected via SUDO_ASKPASS so the script
+    can call sudo non-interactively from within the TUI.
     """
+    import os
+    import shlex
+    import stat
+    import tempfile
+
     # Download the install script
     yield "Downloading Ollama install script..."
     try:
@@ -67,29 +75,51 @@ async def install(version: str = "latest") -> AsyncIterator[str]:
     if version != "latest":
         env_extra["OLLAMA_VERSION"] = version
 
+    askpass_path: str | None = None
+    if sudo_password:
+        # Create a temporary askpass script that echoes the password.
+        # Set SUDO_ASKPASS and patch the script to use `sudo -A` so all
+        # sudo calls in the install script read the password non-interactively.
+        fd, askpass_path = tempfile.mkstemp(suffix=".sh", prefix="llm_askpass_")
+        try:
+            os.write(fd, f"#!/bin/sh\necho {shlex.quote(sudo_password)}\n".encode())
+            os.close(fd)
+            os.chmod(askpass_path, stat.S_IRWXU)
+        except Exception:
+            pass
+        env_extra["SUDO_ASKPASS"] = askpass_path
+        # Patch every `sudo ` call in the script to use -A (askpass)
+        script = script.replace("sudo ", "sudo -A ")
+
     yield f"Running install script{f' (version {version})' if version != 'latest' else ''}..."
 
-    import os
     env = {**os.environ, **env_extra}
 
-    proc = await asyncio.create_subprocess_exec(
-        "sh", "-s", "--",
-        stdin=asyncio.subprocess.PIPE,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.STDOUT,
-        env=env,
-    )
-    assert proc.stdin is not None
-    proc.stdin.write(script.encode())
-    proc.stdin.close()
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "sh", "-s", "--",
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+            env=env,
+        )
+        assert proc.stdin is not None
+        proc.stdin.write(script.encode())
+        proc.stdin.close()
 
-    assert proc.stdout is not None
-    async for line in proc.stdout:
-        yield line.decode(errors="replace").rstrip()
+        assert proc.stdout is not None
+        async for line in proc.stdout:
+            yield line.decode(errors="replace").rstrip()
 
-    await proc.wait()
-    if proc.returncode != 0:
-        raise ServerInstallError(f"Install script exited with code {proc.returncode}")
+        await proc.wait()
+        if proc.returncode != 0:
+            raise ServerInstallError(f"Install script exited with code {proc.returncode}")
+    finally:
+        if askpass_path:
+            try:
+                os.unlink(askpass_path)
+            except Exception:
+                pass
 
     yield "Ollama installed successfully."
 

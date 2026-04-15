@@ -212,8 +212,8 @@ class OllamaServer(AbstractServer):
     async def list_available_versions(self) -> list[str]:
         return await _installer.list_available_versions()
 
-    async def install(self, version: str = "latest") -> AsyncIterator[str]:
-        async for line in _installer.install(version):
+    async def install(self, version: str = "latest", sudo_password: str = "") -> AsyncIterator[str]:
+        async for line in _installer.install(version, sudo_password=sudo_password):
             yield line
 
     async def uninstall(self) -> AsyncIterator[str]:

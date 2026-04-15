@@ -133,7 +133,7 @@ class AbstractServer(ABC):
         ...
 
     @abstractmethod
-    async def install(self, version: str = "latest") -> AsyncIterator[str]:
+    async def install(self, version: str = "latest", sudo_password: str = "") -> AsyncIterator[str]:
         """Stream installation output lines. Raises ServerInstallError on failure."""
         ...
 

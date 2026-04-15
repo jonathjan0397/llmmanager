@@ -193,7 +193,7 @@ class VLLMServer(AbstractServer):
     async def list_available_versions(self) -> list[str]:
         return await _installer.list_available_versions()
 
-    async def install(self, version: str = "latest") -> AsyncIterator[str]:
+    async def install(self, version: str = "latest", sudo_password: str = "") -> AsyncIterator[str]:
         async for line in _installer.install(version):
             yield line
 
