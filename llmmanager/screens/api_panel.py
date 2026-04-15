@@ -1,4 +1,4 @@
-"""API Panel screen — live endpoints, copy, and quick inference test."""
+"""API Panel screen — live server status, endpoints, and quick inference."""
 
 from __future__ import annotations
 
@@ -8,87 +8,213 @@ from typing import TYPE_CHECKING
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.widget import Widget
-from textual.widgets import Button, Input, Label, Select, TextArea
+from textual.widgets import Button, Input, Label, Select, Static
 
-from llmmanager.widgets.endpoint_badge import EndpointBadge
+from llmmanager.models.server import ServerState
 from llmmanager.widgets.log_view import LogView
 
 if TYPE_CHECKING:
     from llmmanager.app import LLMManagerApp
 
 
-class APIPanelScreen(Widget):
-    """Screen 7 — active endpoints and quick inference test."""
+_STATE_BADGE = {
+    ServerState.RUNNING:  "[bold green]● RUNNING[/]",
+    ServerState.STOPPED:  "[bold red]○ STOPPED[/]",
+    ServerState.STARTING: "[bold yellow]◌ STARTING[/]",
+    ServerState.STOPPING: "[bold yellow]◌ STOPPING[/]",
+    ServerState.ERROR:    "[bold red]✗ ERROR[/]",
+    ServerState.UNKNOWN:  "[dim]? UNKNOWN[/]",
+}
 
-    DEFAULT_CSS = "APIPanelScreen { width: 1fr; height: 1fr; }"
+
+class APIPanelScreen(Widget):
+    """Screen 7 — live server status, active endpoints, and quick inference."""
+
+    DEFAULT_CSS = """
+    APIPanelScreen { width: 1fr; height: 1fr; }
+
+    #api-layout { width: 1fr; height: 1fr; }
+
+    /* ---- Left: status + endpoints ---- */
+    #api-left {
+        width: 40;
+        border-right: solid $primary-darken-2;
+        padding: 0 1;
+    }
+
+    .server-status-box {
+        height: auto;
+        border: solid $primary-darken-3;
+        background: $surface-darken-1;
+        padding: 1;
+        margin-bottom: 1;
+    }
+
+    .server-status-name {
+        text-style: bold;
+        color: $primary;
+    }
+
+    .endpoint-url {
+        color: $accent;
+        text-style: italic;
+        margin: 0 0 0 2;
+    }
+
+    .endpoint-proto {
+        color: $text-muted;
+        margin: 0 0 0 2;
+    }
+
+    /* ---- Right: inference ---- */
+    #api-right {
+        width: 1fr;
+        padding: 0 1;
+    }
+
+    #infer-controls {
+        height: auto;
+        margin-bottom: 1;
+    }
+
+    #infer-controls Label { margin: 1 1 0 0; }
+    #infer-controls Select { width: 20; margin-right: 1; }
+    #infer-model-select { width: 26; }
+
+    #infer-prompt-input { width: 1fr; margin-bottom: 1; }
+
+    #infer-actions { height: auto; margin-bottom: 1; }
+    #btn-send-infer { width: 12; }
+    #infer-latency { margin-left: 2; color: $text-muted; }
+
+    #btn-refresh-api { width: 12; margin-left: 1; }
+    """
 
     BINDINGS = [("r", "refresh_endpoints", "Refresh")]
 
     def compose(self) -> ComposeResult:
-        yield Label("Active Endpoints", classes="section-heading")
-        with VerticalScroll(id="endpoints-scroll"):
-            yield Label("Loading...", id="endpoints-placeholder")
+        with Horizontal(id="api-layout"):
+            with VerticalScroll(id="api-left"):
+                yield Label("Server Status & Endpoints", classes="section-heading")
+                yield Static("Loading…", id="server-status-area")
 
-        yield Label("Quick Inference Test", classes="section-heading")
-        with Horizontal(id="infer-controls"):
-            yield Label("Server:")
-            yield Select(
-                options=[("Ollama", "ollama"), ("vLLM", "vllm"), ("LM Studio", "lmstudio")],
-                value="ollama",
-                id="infer-server-select",
-            )
-            yield Label("Model:")
-            yield Input(placeholder="model ID", id="infer-model-input")
+            with Vertical(id="api-right"):
+                yield Label("Quick Inference", classes="section-heading")
+                with Horizontal(id="infer-controls"):
+                    yield Label("Server:")
+                    yield Select(
+                        options=[("Ollama", "ollama"), ("vLLM", "vllm"), ("LM Studio", "lmstudio")],
+                        value="ollama",
+                        id="infer-server-select",
+                    )
+                    yield Label("Model:")
+                    yield Select(
+                        options=[("—", "__none__")],
+                        value="__none__",
+                        id="infer-model-select",
+                    )
 
-        yield Input(
-            placeholder="Enter your prompt here...",
-            id="infer-prompt-input",
-        )
-        with Horizontal(id="infer-actions"):
-            yield Button("Send", id="btn-send-infer", variant="primary")
-            yield Label("", id="infer-latency")
+                yield Input(
+                    placeholder="Enter your prompt here…",
+                    id="infer-prompt-input",
+                )
+                with Horizontal(id="infer-actions"):
+                    yield Button("Send", id="btn-send-infer", variant="primary")
+                    yield Button("Refresh", id="btn-refresh-api", variant="default")
+                    yield Label("", id="infer-latency")
 
-        yield LogView(max_lines=100, id="infer-response")
+                yield LogView(max_lines=200, id="infer-response")
 
     def on_mount(self) -> None:
-        self.run_worker(self._load_endpoints())
+        self.run_worker(self._refresh_all())
 
-    async def _load_endpoints(self) -> None:
+    # ------------------------------------------------------------------
+    # Data loading
+    # ------------------------------------------------------------------
+
+    async def _refresh_all(self) -> None:
+        await self._load_server_status()
+        await self._populate_model_select()
+
+    async def _load_server_status(self) -> None:
         app: LLMManagerApp = self.app  # type: ignore[assignment]
-        scroll = self.query_one("#endpoints-scroll", VerticalScroll)
-        scroll.remove_children()
+        area = self.query_one("#server-status-area", Static)
 
-        any_endpoints = False
+        lines: list[str] = []
         for server in app.registry.all_enabled():
             try:
-                endpoints = await server.get_endpoints()
-                if not endpoints:
-                    continue
-                any_endpoints = True
-                scroll.mount(Label(
-                    f"{server.display_name}",
-                    classes="section-heading",
-                ))
-                for ep in endpoints:
-                    scroll.mount(EndpointBadge(ep))
-            except Exception:
-                pass
+                status = await server.get_status()
+                badge = _STATE_BADGE.get(status.state, "[dim]?[/]")
+                lines.append(f"[bold]{server.display_name}[/]  {badge}")
 
-        if not any_endpoints:
-            scroll.mount(Label("No running servers detected."))
+                if status.state == ServerState.RUNNING:
+                    if status.loaded_models:
+                        models = ", ".join(status.loaded_models[:3])
+                        lines.append(f"  [dim]Models:[/] {models}")
+                    if status.pid:
+                        lines.append(f"  [dim]PID:[/] {status.pid}")
+                    if status.uptime_seconds is not None:
+                        s = int(status.uptime_seconds)
+                        h, m = divmod(s, 3600)
+                        m, sec = divmod(m, 60)
+                        lines.append(f"  [dim]Up:[/] {h:02d}:{m:02d}:{sec:02d}")
+
+                    try:
+                        endpoints = await server.get_endpoints()
+                        for ep in endpoints:
+                            lines.append(f"  [cyan]{ep.url}[/]")
+                            lines.append(f"  [dim]{ep.protocol}[/]")
+                    except Exception:
+                        pass
+                lines.append("")
+            except Exception as exc:
+                lines.append(f"[bold]{server.display_name}[/]  [red]Error: {exc}[/]")
+                lines.append("")
+
+        area.update("\n".join(lines) if lines else "No servers configured.")
+
+    async def _populate_model_select(self) -> None:
+        app: LLMManagerApp = self.app  # type: ignore[assignment]
+        server_type = str(self.query_one("#infer-server-select", Select).value)
+        server = app.registry.get(server_type)
+        select = self.query_one("#infer-model-select", Select)
+        if server is None:
+            return
+        try:
+            models = await server.list_loaded_models()
+        except Exception:
+            models = []
+        if models:
+            select.set_options([(m.display_name, m.model_id) for m in models])
+        else:
+            select.set_options([("No models loaded", "__none__")])
+
+    # ------------------------------------------------------------------
+    # Handlers
+    # ------------------------------------------------------------------
+
+    def on_select_changed(self, event: Select.Changed) -> None:
+        if event.select.id == "infer-server-select":
+            self.run_worker(self._populate_model_select())
 
     async def on_button_pressed(self, event: Button.Pressed) -> None:
-        if event.button.id == "btn-send-infer":
-            await self._run_inference()
+        match event.button.id:
+            case "btn-send-infer":
+                await self._run_inference()
+            case "btn-refresh-api":
+                self.run_worker(self._refresh_all())
 
     async def _run_inference(self) -> None:
         app: LLMManagerApp = self.app  # type: ignore[assignment]
         server_type = str(self.query_one("#infer-server-select", Select).value)
-        model_id = self.query_one("#infer-model-input", Input).value.strip()
-        prompt = self.query_one("#infer-prompt-input", Input).value.strip()
+        model_id    = str(self.query_one("#infer-model-select",  Select).value)
+        prompt      = self.query_one("#infer-prompt-input", Input).value.strip()
 
-        if not model_id or not prompt:
-            self.notify("Enter both a model ID and a prompt.", severity="warning")
+        if model_id == "__none__" or not model_id:
+            self.notify("Select a model first.", severity="warning")
+            return
+        if not prompt:
+            self.notify("Enter a prompt.", severity="warning")
             return
 
         server = app.registry.get(server_type)
@@ -96,20 +222,20 @@ class APIPanelScreen(Widget):
             self.notify(f"Server '{server_type}' not configured.", severity="error")
             return
 
-        response_log = self.query_one("#infer-response", LogView)
-        response_log.clear_log()
-        latency_label = self.query_one("#infer-latency", Label)
-        latency_label.update("Running...")
+        log = self.query_one("#infer-response", LogView)
+        log.clear_log()
+        latency = self.query_one("#infer-latency", Label)
+        latency.update("Running…")
 
         start = time.monotonic()
         try:
             async for token in server.quick_infer(model_id, prompt):
-                response_log.append_line(token)
+                log.append_line(token)
         except Exception as exc:
-            response_log.append_line(f"ERROR: {exc}")
+            log.append_line(f"ERROR: {exc}")
 
         elapsed_ms = (time.monotonic() - start) * 1000
-        latency_label.update(f"Latency: {elapsed_ms:.0f} ms")
+        latency.update(f"{elapsed_ms:.0f} ms")
 
     def action_refresh_endpoints(self) -> None:
-        self.run_worker(self._load_endpoints())
+        self.run_worker(self._refresh_all())

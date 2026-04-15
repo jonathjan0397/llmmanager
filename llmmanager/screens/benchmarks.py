@@ -46,6 +46,15 @@ class BenchmarksScreen(Widget):
     #bench-model-row { height: auto; }
     #bench-model-row Select { width: 1fr; }
     #btn-refresh-models { width: 5; margin-left: 1; }
+    #bench-live-stats {
+        height: auto;
+        padding: 1;
+        background: $surface-darken-1;
+        border: solid $primary-darken-2;
+        margin-top: 1;
+        color: $text;
+    }
+    #run-controls Button { width: 1fr; }
     """
 
     BINDINGS = [
@@ -109,11 +118,12 @@ class BenchmarksScreen(Widget):
 
                     with Horizontal(id="run-controls"):
                         yield Button("Run Benchmark", id="btn-run-bench", variant="primary")
-                        yield Button("Cancel", id="btn-cancel-bench", variant="error", disabled=True)
+                        yield Button("Cancel",        id="btn-cancel-bench", variant="error", disabled=True)
 
+                    yield Static("", id="bench-live-stats")
                     yield Label("", id="bench-progress-label")
                     yield ProgressBar(total=100, id="bench-progress-bar", show_eta=False)
-                    yield LogView(max_lines=200, id="bench-log")
+                    yield LogView(max_lines=300, id="bench-log")
 
             with TabPane("Results", id="tab-results"):
                 yield Static(id="results-tab-content")
@@ -225,11 +235,46 @@ class BenchmarksScreen(Widget):
     async def _run_benchmark_task(
         self, runner: BenchmarkRunner, config: BenchmarkConfig, auto_swap: bool = False
     ) -> None:
-        log = self.query_one("#bench-log", LogView)
-        log.clear_log()
-        progress_label = self.query_one("#bench-progress-label", Label)
+        import time as _time
+        log          = self.query_one("#bench-log", LogView)
+        progress_bar = self.query_one("#bench-progress-bar", ProgressBar)
+        progress_lbl = self.query_one("#bench-progress-label", Label)
+        live_stats   = self.query_one("#bench-live-stats", Static)
 
-        # Auto-swap: unload other models, load the benchmark model
+        log.clear_log()
+        progress_bar.progress = 0
+        live_stats.update("")
+
+        run_start = _time.monotonic()
+
+        # Phase tracking for progress bar (rough % weights)
+        _PHASE_PCT = {
+            "warmup": 5, "throughput": 30, "memory": 5,
+            "concurrency": 40, "context": 15, "quality": 5,
+        }
+        _phase_done = 0.0
+
+        def _elapsed() -> str:
+            s = int(_time.monotonic() - run_start)
+            m, s = divmod(s, 60)
+            return f"{m:02d}:{s:02d}"
+
+        # Accumulated live stats for the stats panel
+        _stats: dict = {}
+
+        def _render_stats() -> str:
+            parts = [f"[bold]Elapsed:[/] {_elapsed()}"]
+            if "tps" in _stats:
+                parts.append(f"[bold]TPS:[/] {_stats['tps']:.1f}")
+            if "ttft" in _stats:
+                parts.append(f"[bold]TTFT:[/] {_stats['ttft']:.0f} ms")
+            if "phase" in _stats:
+                parts.append(f"[bold]Phase:[/] {_stats['phase']}")
+            if "conc" in _stats:
+                parts.append(f"[bold]Concurrency:[/] {_stats['conc']}")
+            return "   ".join(parts)
+
+        # Auto-swap model
         if auto_swap:
             app: LLMManagerApp = self.app  # type: ignore[assignment]
             server = app.registry.get(config.server_type)
@@ -240,24 +285,73 @@ class BenchmarksScreen(Widget):
                         if m.model_id != config.model_id:
                             log.append_line(f"Unloading {m.model_id}…")
                             await server.unload_model(m.model_id)
-                    already_loaded = any(m.model_id == config.model_id for m in loaded)
-                    if not already_loaded:
+                    if not any(m.model_id == config.model_id for m in loaded):
                         log.append_line(f"Loading {config.model_id}…")
                         await server.load_model(config.model_id)
-                        log.append_line(f"Model ready.")
+                        log.append_line("Model ready.")
                 except Exception as exc:
                     log.append_line(f"[yellow]Warning: model swap failed: {exc}[/]")
+
+        # Start a timer task that refreshes the stats panel every second
+        async def _tick() -> None:
+            while True:
+                live_stats.update(_render_stats())
+                await asyncio.sleep(1.0)
+
+        ticker = asyncio.create_task(_tick())
 
         try:
             async for msg, result in runner.run(config):
                 log.append_line(msg)
-                progress_label.update(msg)
+                progress_lbl.update(msg)
+
+                # Parse phase transitions for progress bar
+                ml = msg.lower()
+                if "warmup" in ml:
+                    _stats["phase"] = "Warm-up"
+                    progress_bar.progress = _phase_done
+                elif "throughput" in ml:
+                    _stats["phase"] = "Throughput"
+                    progress_bar.progress = _phase_done
+                elif "vram" in ml or "memory" in ml:
+                    _stats["phase"] = "Memory"
+                    _phase_done += _PHASE_PCT["memory"]
+                    progress_bar.progress = _phase_done
+                elif "concurrency test" in ml:
+                    m_conc = msg.split(":")[-1].strip().split()[0] if ":" in msg else ""
+                    _stats["phase"] = "Concurrency"
+                    _stats["conc"] = m_conc
+                    progress_bar.progress = min(_phase_done + _PHASE_PCT["concurrency"] * 0.5, 95)
+                elif "complete" in ml or "avg" in ml:
+                    _phase_done = min(_phase_done + 30, 95)
+                    progress_bar.progress = _phase_done
+
+                # Extract TPS / TTFT from per-run lines
+                if "tps" in ml and "ttft" in ml:
+                    try:
+                        parts = msg.split()
+                        tps_i = next(i for i, p in enumerate(parts) if p == "TPS")
+                        ttft_i = next(i for i, p in enumerate(parts) if p == "ms")
+                        _stats["tps"] = float(parts[tps_i - 1])
+                        _stats["ttft"] = float(parts[ttft_i - 1])
+                    except Exception:
+                        pass
+
+                live_stats.update(_render_stats())
+
                 if result is not None:
                     self._last_result = result
+                    progress_bar.progress = 100
+                    _stats["tps"] = result.tokens_per_sec
+                    _stats["ttft"] = result.ttft_ms
+                    _stats["phase"] = "Complete"
+                    live_stats.update(_render_stats())
                     self._show_results(result)
+
         except asyncio.CancelledError:
             log.append_line("Benchmark cancelled.")
         finally:
+            ticker.cancel()
             self.query_one("#btn-run-bench", Button).disabled = False
             self.query_one("#btn-cancel-bench", Button).disabled = True
 

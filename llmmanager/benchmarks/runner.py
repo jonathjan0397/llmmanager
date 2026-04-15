@@ -63,10 +63,10 @@ class BenchmarkRunner:
 
             if BenchmarkCategory.THROUGHPUT in config.categories:
                 yield ("Running throughput benchmark...", None)
-                tps, ttft, total = await self._throughput(config)
-                result.tokens_per_sec = tps
-                result.ttft_ms = ttft
-                result.total_duration_ms = total
+                async for msg, stats in self._throughput_gen(config):
+                    if stats is not None:
+                        result.tokens_per_sec, result.ttft_ms, result.total_duration_ms = stats
+                    yield (msg, None)
 
             if BenchmarkCategory.MEMORY in config.categories:
                 yield ("Measuring peak VRAM...", None)
@@ -109,10 +109,11 @@ class BenchmarkRunner:
     # Throughput
     # ------------------------------------------------------------------
 
-    async def _throughput(
+    async def _throughput_gen(
         self, config: BenchmarkConfig
-    ) -> tuple[float, float, float]:
-        """Returns (tokens_per_sec, ttft_ms, total_ms)."""
+    ) -> AsyncIterator[tuple[str, tuple[float, float, float] | None]]:
+        """Yields per-run stats, then a final tuple (tps, ttft, total)."""
+        import statistics
         tps_samples: list[float] = []
         ttft_samples: list[float] = []
         total_samples: list[float] = []
@@ -125,20 +126,31 @@ class BenchmarkRunner:
             async for token in self._server.quick_infer(config.model_id, config.prompt):
                 if first_token_time is None:
                     first_token_time = time.monotonic()
-                token_count += len(token.split())  # rough token count
+                token_count += len(token.split())
 
             elapsed_ms = (time.monotonic() - start) * 1000
             ttft_ms = ((first_token_time - start) * 1000) if first_token_time else elapsed_ms
+            tps = compute_tokens_per_sec(token_count, elapsed_ms)
 
-            tps_samples.append(compute_tokens_per_sec(token_count, elapsed_ms))
+            tps_samples.append(tps)
             ttft_samples.append(ttft_ms)
             total_samples.append(elapsed_ms)
 
-        import statistics
-        return (
+            yield (
+                f"  Run {run_i + 1}/{config.n_runs}:  "
+                f"{tps:.1f} TPS   TTFT {ttft_ms:.0f} ms   "
+                f"{token_count} tokens   {elapsed_ms:.0f} ms total",
+                None,
+            )
+
+        final: tuple[float, float, float] = (
             statistics.mean(tps_samples) if tps_samples else 0.0,
             statistics.mean(ttft_samples) if ttft_samples else 0.0,
             statistics.mean(total_samples) if total_samples else 0.0,
+        )
+        yield (
+            f"Throughput avg:  {final[0]:.1f} TPS   TTFT {final[1]:.0f} ms",
+            final,
         )
 
     # ------------------------------------------------------------------
