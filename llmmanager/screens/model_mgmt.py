@@ -18,7 +18,7 @@ from textual.widgets import (
     TabPane,
 )
 
-from llmmanager.models.llm_model import DownloadProgress
+from llmmanager.models.llm_model import DownloadProgress, ModelSource
 from llmmanager.widgets.confirm_dialog import ConfirmDialog
 
 if TYPE_CHECKING:
@@ -32,29 +32,61 @@ class ModelManagementScreen(Widget):
     DEFAULT_CSS = """
     ModelManagementScreen { width: 1fr; height: 1fr; }
 
-    #installed-actions {
+    .model-action-bar {
         height: auto;
         padding: 1 0 0 0;
     }
-    #installed-actions Button { width: 1fr; }
-
-    #ollama-actions {
-        height: auto;
-        padding: 1 0 0 0;
-    }
-    #ollama-actions Button { width: 1fr; }
-
-    #hf-actions {
-        height: auto;
-        padding: 1 0 0 0;
-    }
-    #hf-actions Button { width: 1fr; }
+    .model-action-bar Button { width: 1fr; }
 
     #download-bar {
         height: 1;
         padding: 0 1;
         color: $accent;
         background: $surface-darken-1;
+    }
+
+    /* ---- Credentials tab ---- */
+    #creds-scroll {
+        width: 1fr;
+        height: 1fr;
+        padding: 1 2;
+    }
+
+    .creds-service-box {
+        height: auto;
+        border: solid $primary-darken-2;
+        padding: 1;
+        margin-bottom: 1;
+    }
+
+    .creds-service-title {
+        text-style: bold;
+        color: $primary;
+        margin-bottom: 1;
+    }
+
+    .creds-status {
+        margin-bottom: 1;
+    }
+
+    .creds-input-row {
+        height: auto;
+    }
+
+    .creds-input-row Input {
+        width: 1fr;
+    }
+
+    .creds-save-btn {
+        width: 12;
+        margin-left: 1;
+    }
+
+    .hf-auth-banner {
+        height: auto;
+        padding: 0 1;
+        color: $text-muted;
+        margin-bottom: 1;
     }
     """
 
@@ -73,36 +105,82 @@ class ModelManagementScreen(Widget):
 
     def compose(self) -> ComposeResult:
         with TabbedContent(id="model-tabs"):
+            # ---- Installed ------------------------------------------------
             with TabPane("Installed", id="tab-installed"):
-                yield Input(placeholder="Filter installed models...", id="installed-search")
+                yield Input(placeholder="Filter models...", id="installed-search")
                 yield DataTable(id="installed-table", cursor_type="row")
-                with Horizontal(id="installed-actions"):
+                with Horizontal(classes="model-action-bar"):
                     yield Button("Load",   id="btn-load",   variant="success")
                     yield Button("Unload", id="btn-unload", variant="warning")
                     yield Button("Delete", id="btn-delete", variant="error")
 
+            # ---- Ollama Library -------------------------------------------
             with TabPane("Ollama Library", id="tab-ollama-lib"):
+                yield Static(
+                    "[bold green]LOCAL[/]  Models are downloaded and run on your hardware.",
+                    classes="hf-auth-banner",
+                )
                 yield Input(placeholder="Search Ollama library...", id="ollama-search")
                 yield DataTable(id="ollama-table", cursor_type="row")
-                with Horizontal(id="ollama-actions"):
+                with Horizontal(classes="model-action-bar"):
                     yield Button("Download Selected", id="btn-ollama-download", variant="primary")
                     yield Button("Refresh",           id="btn-ollama-refresh",  variant="default")
 
+            # ---- HuggingFace ---------------------------------------------
             with TabPane("HuggingFace", id="tab-hf"):
+                yield Static("", id="hf-auth-banner", classes="hf-auth-banner")
                 yield Input(placeholder="Search HuggingFace GGUF models...", id="hf-search")
                 yield DataTable(id="hf-table", cursor_type="row")
-                with Horizontal(id="hf-actions"):
+                with Horizontal(classes="model-action-bar"):
                     yield Button("Download Selected", id="btn-hf-download", variant="primary")
                     yield Button("Refresh",           id="btn-hf-refresh",  variant="default")
 
+            # ---- Local Import --------------------------------------------
             with TabPane("Local Import", id="tab-local"):
                 yield Label("Enter a local file path (GGUF or safetensors):", classes="form-label")
                 yield Input(placeholder="/path/to/model.gguf", id="local-path-input")
                 yield Button("Import", id="btn-local-import", variant="primary")
-                yield Static(
-                    "[dim]Local import is not yet supported in this version.[/]",
-                    id="local-import-note",
-                )
+                yield Static("[dim]Local import is not yet supported.[/]")
+
+            # ---- Credentials ---------------------------------------------
+            with TabPane("Credentials", id="tab-creds"):
+                yield Static("", id="creds-save-feedback")
+                with Vertical(id="creds-scroll"):
+                    # HuggingFace
+                    with Vertical(classes="creds-service-box"):
+                        yield Label("HuggingFace", classes="creds-service-title")
+                        yield Static("", id="creds-hf-status", classes="creds-status")
+                        yield Label("API Token  (needed for gated/private models)")
+                        with Horizontal(classes="creds-input-row"):
+                            yield Input(password=True, placeholder="hf_...", id="creds-hf-input")
+                            yield Button("Save", id="btn-save-hf", variant="primary", classes="creds-save-btn")
+
+                    # OpenAI
+                    with Vertical(classes="creds-service-box"):
+                        yield Label("OpenAI  [bold blue]CLOUD[/]", classes="creds-service-title")
+                        yield Static("", id="creds-openai-status", classes="creds-status")
+                        yield Label("API Key")
+                        with Horizontal(classes="creds-input-row"):
+                            yield Input(password=True, placeholder="sk-...", id="creds-openai-input")
+                            yield Button("Save", id="btn-save-openai", variant="primary", classes="creds-save-btn")
+
+                    # Anthropic
+                    with Vertical(classes="creds-service-box"):
+                        yield Label("Anthropic  [bold blue]CLOUD[/]", classes="creds-service-title")
+                        yield Static("", id="creds-anthropic-status", classes="creds-status")
+                        yield Label("API Key")
+                        with Horizontal(classes="creds-input-row"):
+                            yield Input(password=True, placeholder="sk-ant-...", id="creds-anthropic-input")
+                            yield Button("Save", id="btn-save-anthropic", variant="primary", classes="creds-save-btn")
+
+                    # Groq
+                    with Vertical(classes="creds-service-box"):
+                        yield Label("Groq  [bold blue]CLOUD[/]", classes="creds-service-title")
+                        yield Static("", id="creds-groq-status", classes="creds-status")
+                        yield Label("API Key")
+                        with Horizontal(classes="creds-input-row"):
+                            yield Input(password=True, placeholder="gsk_...", id="creds-groq-input")
+                            yield Button("Save", id="btn-save-groq", variant="primary", classes="creds-save-btn")
 
         yield Static("", id="download-bar")
 
@@ -112,7 +190,7 @@ class ModelManagementScreen(Widget):
 
     def on_mount(self) -> None:
         self.query_one("#installed-table", DataTable).add_columns(
-            "Name", "Size", "Quant", "VRAM Est.", "Server", "Status"
+            "Name", "Size", "Context", "Server / Provider", "Type"
         )
         self.query_one("#ollama-table", DataTable).add_columns(
             "Name", "Tags", "Description"
@@ -122,9 +200,11 @@ class ModelManagementScreen(Widget):
         )
         self.run_worker(self._load_installed())
         self.run_worker(self._watch_downloads())
+        self._refresh_creds_status()
+        self._refresh_hf_banner()
 
     # ------------------------------------------------------------------
-    # Tab activation — lazy-load Ollama Library on first visit
+    # Tab activation — lazy-load on first visit
     # ------------------------------------------------------------------
 
     def on_tabbed_content_tab_activated(self, event: TabbedContent.TabActivated) -> None:
@@ -134,33 +214,59 @@ class ModelManagementScreen(Widget):
             self.run_worker(self._load_ollama_library())
         elif event.tab.id == "tab-hf" and not self._hf_loaded:
             self.run_worker(self._load_hf_library())
+        elif event.tab.id == "tab-creds":
+            self._refresh_creds_status()
 
     # ------------------------------------------------------------------
     # Data loaders
     # ------------------------------------------------------------------
 
     async def _load_installed(self, query: str = "") -> None:
+        from llmmanager.hub.cloud_models import get_cloud_models
         app: LLMManagerApp = self.app  # type: ignore[assignment]
         table = self.query_one("#installed-table", DataTable)
         table.clear()
         q = query.lower()
+        cfg = app.config_manager.config
+
+        # Local models from running servers
         for server in app.registry.all_enabled():
             try:
                 models = await server.list_loaded_models()
                 for m in models:
                     if q and q not in m.display_name.lower():
                         continue
+                    ctx = f"{m.context_length // 1000}k" if m.context_length else "?"
                     table.add_row(
                         m.display_name,
                         f"{m.size_gb:.1f} GB" if m.size_gb else "?",
-                        m.quantization or "?",
-                        f"{m.vram_estimate_mb:.0f} MB" if m.vram_estimate_mb else "?",
+                        ctx,
                         server.display_name,
-                        "[green]Loaded[/]" if m.is_loaded else "On-disk",
+                        "[bold green]LOCAL[/]",
                         key=f"{server.name}:{m.model_id}",
                     )
             except Exception:
                 pass
+
+        # Cloud models (shown when API key is configured)
+        cloud = get_cloud_models(
+            openai_key=cfg.openai_api_key,
+            anthropic_key=cfg.anthropic_api_key,
+            groq_key=cfg.groq_api_key,
+        )
+        for m in cloud:
+            if q and q not in m.display_name.lower():
+                continue
+            ctx = f"{m.context_length // 1000}k" if m.context_length else "?"
+            provider = m.source.value.title()
+            table.add_row(
+                m.display_name,
+                "API",
+                ctx,
+                provider,
+                "[bold blue]CLOUD[/]",
+                key=f"cloud:{m.source.value}:{m.model_id}",
+            )
 
     async def _load_ollama_library(self, query: str = "") -> None:
         from llmmanager.hub.ollama_library import search_models
@@ -176,22 +282,24 @@ class ModelManagementScreen(Widget):
         except Exception as exc:
             self.notify(f"Ollama library error: {exc}", severity="error")
 
-    # ------------------------------------------------------------------
-    # Download progress watcher
-    # ------------------------------------------------------------------
-
     async def _load_hf_library(self, query: str = "") -> None:
         from llmmanager.hub.huggingface import search_models
+        app: LLMManagerApp = self.app  # type: ignore[assignment]
         table = self.query_one("#hf-table", DataTable)
         table.clear()
         try:
-            models = await search_models(query=query, limit=30)
+            token = app.config_manager.config.hf_token
+            models = await search_models(query=query, limit=30, hf_token=token)
             for m in models:
                 tags = ", ".join(m.tags[:5]) if m.tags else "—"
                 table.add_row(m.display_name, tags, m.description or "—", key=m.model_id)
             self._hf_loaded = True
         except Exception as exc:
             self.notify(f"HuggingFace error: {exc}", severity="error")
+
+    # ------------------------------------------------------------------
+    # Download progress watcher
+    # ------------------------------------------------------------------
 
     async def _watch_downloads(self) -> None:
         app: LLMManagerApp = self.app  # type: ignore[assignment]
@@ -204,36 +312,72 @@ class ModelManagementScreen(Widget):
                 continue
             except asyncio.CancelledError:
                 return
-
             if prog.status == "complete":
-                bar.update(f"Download complete: {prog.model_id}")
+                bar.update(f"[green]Download complete:[/] {prog.model_id}")
                 self.run_worker(self._load_installed())
             elif prog.status == "error":
-                bar.update(f"[red]Error downloading {prog.model_id}: {prog.error}[/]")
+                bar.update(f"[red]Error:[/] {prog.model_id} — {prog.error}")
             else:
-                pct = ""
-                if prog.total_bytes:
-                    pct = f" {prog.downloaded_bytes / prog.total_bytes * 100:.0f}%"
-                speed = ""
-                if prog.speed_bps and prog.speed_bps > 1024:
-                    speed = f"  {prog.speed_bps / 1_048_576:.1f} MB/s"
-                bar.update(f"Downloading {prog.model_id}{pct}{speed}")
+                pct = f" {prog.progress_pct:.0f}%" if prog.total_bytes else ""
+                speed = f"  {prog.speed_bps / 1_048_576:.1f} MB/s" if prog.speed_bps and prog.speed_bps > 1024 else ""
+                bar.update(f"[yellow]Downloading[/] {prog.model_id}{pct}{speed}")
+
+    # ------------------------------------------------------------------
+    # Credentials helpers
+    # ------------------------------------------------------------------
+
+    def _refresh_creds_status(self) -> None:
+        try:
+            app: LLMManagerApp = self.app  # type: ignore[assignment]
+            cfg = app.config_manager.config
+            _set = "[bold green]✓ Set[/]"
+            _unset = "[dim]✗ Not configured[/]"
+            self.query_one("#creds-hf-status",       Static).update(_set if cfg.hf_token          else _unset)
+            self.query_one("#creds-openai-status",   Static).update(_set if cfg.openai_api_key    else _unset)
+            self.query_one("#creds-anthropic-status",Static).update(_set if cfg.anthropic_api_key else _unset)
+            self.query_one("#creds-groq-status",     Static).update(_set if cfg.groq_api_key      else _unset)
+        except Exception:
+            pass
+
+    def _refresh_hf_banner(self) -> None:
+        try:
+            app: LLMManagerApp = self.app  # type: ignore[assignment]
+            cfg = app.config_manager.config
+            if cfg.hf_token:
+                msg = "[bold green]LOCAL[/]  Authenticated with HuggingFace — gated models accessible."
+            else:
+                msg = "[bold green]LOCAL[/]  Models run on your hardware.  [dim]No HF token — gated models unavailable. Set one in Credentials.[/]"
+            self.query_one("#hf-auth-banner", Static).update(msg)
+        except Exception:
+            pass
+
+    def _save_credential(self, field: str, value: str) -> None:
+        app: LLMManagerApp = self.app  # type: ignore[assignment]
+        app.config_manager.update(**{field: value or None})
+        self._refresh_creds_status()
+        self._refresh_hf_banner()
+        # Reload installed to pick up new cloud models
+        self.run_worker(self._load_installed())
+        # Invalidate HF cache so next visit re-authenticates
+        if field == "hf_token":
+            self._hf_loaded = False
 
     # ------------------------------------------------------------------
     # Selection helper
     # ------------------------------------------------------------------
 
     def _get_installed_selection(self) -> tuple["AbstractServer", str] | None:
-        """Return (server, model_id) for the currently highlighted installed row."""
+        """Return (server, model_id) for the selected installed row. None for cloud rows."""
         app: LLMManagerApp = self.app  # type: ignore[assignment]
         table = self.query_one("#installed-table", DataTable)
         if table.cursor_row is None:
             return None
         row = table.get_row_at(table.cursor_row)
+        row_type = str(row[4])  # "LOCAL" or "CLOUD" (markup stripped by Textual display)
         model_name = str(row[0])
-        server_display = str(row[4])
+        provider = str(row[3])
         server = next(
-            (s for s in app.registry.all_enabled() if s.display_name == server_display),
+            (s for s in app.registry.all_enabled() if s.display_name == provider),
             None,
         )
         return (server, model_name) if server else None
@@ -266,15 +410,27 @@ class ModelManagementScreen(Widget):
                 ))
             case "btn-local-import":
                 self.notify("Local import is not yet supported.", severity="warning")
+            case "btn-save-hf":
+                self._save_credential("hf_token", self.query_one("#creds-hf-input", Input).value.strip())
+                self.notify("HuggingFace token saved.")
+            case "btn-save-openai":
+                self._save_credential("openai_api_key", self.query_one("#creds-openai-input", Input).value.strip())
+                self.notify("OpenAI API key saved.")
+            case "btn-save-anthropic":
+                self._save_credential("anthropic_api_key", self.query_one("#creds-anthropic-input", Input).value.strip())
+                self.notify("Anthropic API key saved.")
+            case "btn-save-groq":
+                self._save_credential("groq_api_key", self.query_one("#creds-groq-input", Input).value.strip())
+                self.notify("Groq API key saved.")
 
     # ------------------------------------------------------------------
-    # Actions
+    # Local model actions
     # ------------------------------------------------------------------
 
     async def _do_load_selected(self) -> None:
         sel = self._get_installed_selection()
         if not sel:
-            self.notify("Select a model first.", severity="warning")
+            self.notify("Select a local model to load.", severity="warning")
             return
         server, model_id = sel
         self.notify(f"Loading {model_id}…")
@@ -288,7 +444,7 @@ class ModelManagementScreen(Widget):
     async def _do_unload_selected(self) -> None:
         sel = self._get_installed_selection()
         if not sel:
-            self.notify("Select a model first.", severity="warning")
+            self.notify("Select a local model to unload.", severity="warning")
             return
         server, model_id = sel
         try:
@@ -301,7 +457,7 @@ class ModelManagementScreen(Widget):
     async def _do_delete_selected(self) -> None:
         sel = self._get_installed_selection()
         if not sel:
-            self.notify("Select a model first.", severity="warning")
+            self.notify("Select a local model to delete.", severity="warning")
             return
         server, model_id = sel
         confirmed = await self.app.push_screen_wait(
@@ -321,32 +477,27 @@ class ModelManagementScreen(Widget):
         if table.cursor_row is None:
             self.notify("Select a model first.", severity="warning")
             return
-        row = table.get_row_at(table.cursor_row)
-        model_name = str(row[0])
+        model_name = str(table.get_row_at(table.cursor_row)[0])
         ollama = app.registry.get("ollama")
         if ollama is None:
             self.notify("Ollama is not running.", severity="error")
             return
         app.download_manager.enqueue(ollama, model_name)
-        self.notify(f"Queued download: {model_name}")
+        self.notify(f"Queued: {model_name}")
 
     def _enqueue_hf_download(self) -> None:
-        """Queue a HuggingFace GGUF model download via Ollama's HF pull support."""
         app: LLMManagerApp = self.app  # type: ignore[assignment]
         table = self.query_one("#hf-table", DataTable)
         if table.cursor_row is None:
             self.notify("Select a model first.", severity="warning")
             return
-        row = table.get_row_at(table.cursor_row)
-        repo_id = str(row[0])
+        repo_id = str(table.get_row_at(table.cursor_row)[0])
         ollama = app.registry.get("ollama")
         if ollama is None:
             self.notify("Ollama is not running.", severity="error")
             return
-        # Ollama supports pulling HuggingFace GGUF models via "hf.co/<repo_id>"
-        model_ref = f"hf.co/{repo_id}"
-        app.download_manager.enqueue(ollama, model_ref)
-        self.notify(f"Queued download: {repo_id}")
+        app.download_manager.enqueue(ollama, f"hf.co/{repo_id}")
+        self.notify(f"Queued: {repo_id}")
 
     # ------------------------------------------------------------------
     # Input filter
@@ -363,7 +514,7 @@ class ModelManagementScreen(Widget):
             self.run_worker(self._load_hf_library(query=event.value))
 
     # ------------------------------------------------------------------
-    # Keyboard action handlers
+    # Keyboard actions
     # ------------------------------------------------------------------
 
     def action_load_model(self) -> None:
@@ -376,7 +527,11 @@ class ModelManagementScreen(Widget):
         self.run_worker(self._do_delete_selected())
 
     def action_download_model(self) -> None:
-        self._enqueue_ollama_download()
+        tabs = self.query_one("#model-tabs", TabbedContent)
+        if tabs.active == "tab-ollama-lib":
+            self._enqueue_ollama_download()
+        elif tabs.active == "tab-hf":
+            self._enqueue_hf_download()
 
     def action_focus_search(self) -> None:
         tabs = self.query_one("#model-tabs", TabbedContent)

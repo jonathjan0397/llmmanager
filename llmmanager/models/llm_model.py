@@ -10,6 +10,19 @@ class ModelSource(str, Enum):
     OLLAMA_LIBRARY = "ollama_library"
     HUGGINGFACE    = "huggingface"
     LOCAL          = "local"
+    OPENAI         = "openai"
+    ANTHROPIC      = "anthropic"
+    GROQ           = "groq"
+
+    @property
+    def is_cloud(self) -> bool:
+        return self in (ModelSource.OPENAI, ModelSource.ANTHROPIC, ModelSource.GROQ)
+
+    @property
+    def badge(self) -> str:
+        if self.is_cloud:
+            return "[bold blue]CLOUD[/]"
+        return "[bold green]LOCAL[/]"
 
 
 class CompatibilityTier(str, Enum):
