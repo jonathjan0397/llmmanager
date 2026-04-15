@@ -44,6 +44,12 @@ class ModelManagementScreen(Widget):
     }
     #ollama-actions Button { width: 1fr; }
 
+    #hf-actions {
+        height: auto;
+        padding: 1 0 0 0;
+    }
+    #hf-actions Button { width: 1fr; }
+
     #download-bar {
         height: 1;
         padding: 0 1;
@@ -63,6 +69,7 @@ class ModelManagementScreen(Widget):
     def __init__(self) -> None:
         super().__init__()
         self._ollama_lib_loaded = False
+        self._hf_loaded = False
 
     def compose(self) -> ComposeResult:
         with TabbedContent(id="model-tabs"):
@@ -80,6 +87,13 @@ class ModelManagementScreen(Widget):
                 with Horizontal(id="ollama-actions"):
                     yield Button("Download Selected", id="btn-ollama-download", variant="primary")
                     yield Button("Refresh",           id="btn-ollama-refresh",  variant="default")
+
+            with TabPane("HuggingFace", id="tab-hf"):
+                yield Input(placeholder="Search HuggingFace GGUF models...", id="hf-search")
+                yield DataTable(id="hf-table", cursor_type="row")
+                with Horizontal(id="hf-actions"):
+                    yield Button("Download Selected", id="btn-hf-download", variant="primary")
+                    yield Button("Refresh",           id="btn-hf-refresh",  variant="default")
 
             with TabPane("Local Import", id="tab-local"):
                 yield Label("Enter a local file path (GGUF or safetensors):", classes="form-label")
@@ -112,6 +126,11 @@ class ModelManagementScreen(Widget):
             if not t.columns:
                 t.add_columns("Name", "Tags", "Description")
             self.run_worker(self._load_ollama_library())
+        elif event.tab.id == "tab-hf" and not self._hf_loaded:
+            t = self.query_one("#hf-table", DataTable)
+            if not t.columns:
+                t.add_columns("Repo ID", "Tags", "Downloads")
+            self.run_worker(self._load_hf_library())
 
     # ------------------------------------------------------------------
     # Data loaders
@@ -157,6 +176,19 @@ class ModelManagementScreen(Widget):
     # ------------------------------------------------------------------
     # Download progress watcher
     # ------------------------------------------------------------------
+
+    async def _load_hf_library(self, query: str = "") -> None:
+        from llmmanager.hub.huggingface import search_models
+        table = self.query_one("#hf-table", DataTable)
+        table.clear()
+        try:
+            models = await search_models(query=query, limit=30)
+            for m in models:
+                tags = ", ".join(m.tags[:5]) if m.tags else "—"
+                table.add_row(m.display_name, tags, m.description or "—", key=m.model_id)
+            self._hf_loaded = True
+        except Exception as exc:
+            self.notify(f"HuggingFace error: {exc}", severity="error")
 
     async def _watch_downloads(self) -> None:
         app: LLMManagerApp = self.app  # type: ignore[assignment]
@@ -221,6 +253,13 @@ class ModelManagementScreen(Widget):
                 self._ollama_lib_loaded = False
                 self.run_worker(self._load_ollama_library(
                     query=self.query_one("#ollama-search", Input).value
+                ))
+            case "btn-hf-download":
+                self._enqueue_hf_download()
+            case "btn-hf-refresh":
+                self._hf_loaded = False
+                self.run_worker(self._load_hf_library(
+                    query=self.query_one("#hf-search", Input).value
                 ))
             case "btn-local-import":
                 self.notify("Local import is not yet supported.", severity="warning")
@@ -288,6 +327,24 @@ class ModelManagementScreen(Widget):
         app.download_manager.enqueue(ollama, model_name)
         self.notify(f"Queued download: {model_name}")
 
+    def _enqueue_hf_download(self) -> None:
+        """Queue a HuggingFace GGUF model download via Ollama's HF pull support."""
+        app: LLMManagerApp = self.app  # type: ignore[assignment]
+        table = self.query_one("#hf-table", DataTable)
+        if table.cursor_row is None:
+            self.notify("Select a model first.", severity="warning")
+            return
+        row = table.get_row_at(table.cursor_row)
+        repo_id = str(row[0])
+        ollama = app.registry.get("ollama")
+        if ollama is None:
+            self.notify("Ollama is not running.", severity="error")
+            return
+        # Ollama supports pulling HuggingFace GGUF models via "hf.co/<repo_id>"
+        model_ref = f"hf.co/{repo_id}"
+        app.download_manager.enqueue(ollama, model_ref)
+        self.notify(f"Queued download: {repo_id}")
+
     # ------------------------------------------------------------------
     # Input filter
     # ------------------------------------------------------------------
@@ -298,6 +355,9 @@ class ModelManagementScreen(Widget):
         elif event.input.id == "ollama-search":
             self._ollama_lib_loaded = False
             self.run_worker(self._load_ollama_library(query=event.value))
+        elif event.input.id == "hf-search":
+            self._hf_loaded = False
+            self.run_worker(self._load_hf_library(query=event.value))
 
     # ------------------------------------------------------------------
     # Keyboard action handlers
@@ -317,7 +377,11 @@ class ModelManagementScreen(Widget):
 
     def action_focus_search(self) -> None:
         tabs = self.query_one("#model-tabs", TabbedContent)
-        if tabs.active == "tab-installed":
-            self.query_one("#installed-search", Input).focus()
-        elif tabs.active == "tab-ollama-lib":
-            self.query_one("#ollama-search", Input).focus()
+        mapping = {
+            "tab-installed":  "#installed-search",
+            "tab-ollama-lib": "#ollama-search",
+            "tab-hf":         "#hf-search",
+        }
+        search_id = mapping.get(tabs.active)
+        if search_id:
+            self.query_one(search_id, Input).focus()
