@@ -26,12 +26,6 @@ classifiers = [
     "Topic :: System :: Systems Administration",
     "Topic :: Terminals",
 ]
-
-[project.urls]
-Homepage   = "https://github.com/jonathjan0397/llmmanager"
-Repository = "https://github.com/jonathjan0397/llmmanager"
-Issues     = "https://github.com/jonathjan0397/llmmanager/issues"
-
 dependencies = [
     # TUI framework
     "textual>=0.70.0",
@@ -58,6 +52,11 @@ dependencies = [
     # Async file I/O (used by log tailer)
     "aiofiles>=23.0.0",
 ]
+
+[project.urls]
+Homepage   = "https://github.com/jonathjan0397/llmmanager"
+Repository = "https://github.com/jonathjan0397/llmmanager"
+Issues     = "https://github.com/jonathjan0397/llmmanager/issues"
 
 [project.optional-dependencies]
 dev = [
