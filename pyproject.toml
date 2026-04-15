@@ -6,8 +6,31 @@ build-backend = "hatchling.build"
 name = "llmmanager"
 version = "0.1.0"
 description = "TUI control panel for LLM server stacks on Linux"
+readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
+authors = [{ name = "jonathjan0397" }]
+keywords = ["llm", "ollama", "vllm", "tui", "ai", "gpu", "benchmark"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: System :: Systems Administration",
+    "Topic :: Terminals",
+]
+
+[project.urls]
+Homepage   = "https://github.com/jonathjan0397/llmmanager"
+Repository = "https://github.com/jonathjan0397/llmmanager"
+Issues     = "https://github.com/jonathjan0397/llmmanager/issues"
 
 dependencies = [
     # TUI framework
