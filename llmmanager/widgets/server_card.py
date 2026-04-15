@@ -56,9 +56,9 @@ class ServerCard(Widget):
     server_info: reactive[ServerInfo | None] = reactive(None)
 
     def __init__(self, server_type: str, **kwargs) -> None:
+        kwargs.setdefault("id", f"card-{server_type}")
         super().__init__(**kwargs)
         self._server_type = server_type
-        self.id = f"server-card-{server_type}"
 
     def compose(self) -> ComposeResult:
         yield Label("", id=f"{self._server_type}-card-header", classes="card-header")

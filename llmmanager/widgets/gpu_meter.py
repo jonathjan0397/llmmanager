@@ -41,9 +41,9 @@ class GPUMeter(Widget):
     gpu_info: reactive[GPUInfo | None] = reactive(None)
 
     def __init__(self, gpu_index: int, **kwargs) -> None:
+        kwargs.setdefault("id", f"gpu-meter-{gpu_index}")
         super().__init__(**kwargs)
         self._gpu_index = gpu_index
-        self.id = f"gpu-meter-{gpu_index}"
 
     def compose(self) -> ComposeResult:
         yield Label("", id=f"gpu-{self._gpu_index}-name", classes="gpu-name")

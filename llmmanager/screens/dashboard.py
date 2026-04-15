@@ -31,9 +31,9 @@ class DashboardScreen(Widget):
     def compose(self) -> ComposeResult:
         yield Label("Server Status", id="dash-servers-heading", classes="section-heading")
         with Horizontal(id="server-cards-row"):
-            yield ServerCard("ollama", id="card-ollama")
-            yield ServerCard("vllm",   id="card-vllm")
-            yield ServerCard("lmstudio", id="card-lmstudio")
+            yield ServerCard("ollama")
+            yield ServerCard("vllm")
+            yield ServerCard("lmstudio")
 
         yield Label("GPU", id="dash-gpu-heading", classes="section-heading")
         with ScrollableContainer(id="gpu-meters-container"):
