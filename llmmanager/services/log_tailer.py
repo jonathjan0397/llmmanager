@@ -58,8 +58,11 @@ class LogTailerService:
             except asyncio.CancelledError:
                 return
             except Exception:
-                # Server not yet running or restarted — retry after a delay
-                await asyncio.sleep(2.0)
+                pass
+            # Always yield before retrying — prevents a tight spin loop when the
+            # server isn't running yet (important: Textual uses eager_task_factory
+            # so tasks run synchronously on create_task until their first await).
+            await asyncio.sleep(2.0)
 
     async def _enqueue(self, entry: LogLine) -> None:
         if self._queue.full():
