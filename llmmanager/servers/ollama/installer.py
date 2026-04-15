@@ -125,30 +125,67 @@ async def install(version: str = "latest", sudo_password: str = "") -> AsyncIter
     yield "Ollama installed successfully."
 
 
-async def uninstall() -> AsyncIterator[str]:
+async def uninstall(sudo_password: str = "") -> AsyncIterator[str]:
     """Remove the ollama binary and service files."""
-    yield "Removing Ollama binary..."
-    path = shutil.which("ollama")
-    if path:
-        proc = await asyncio.create_subprocess_exec(
-            "sudo", "rm", "-f", path,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,
-        )
-        async for line in proc.stdout:  # type: ignore[union-attr]
-            yield line.decode(errors="replace").rstrip()
+    import os
+
+    async def _sudo_rm(*paths: str) -> int:
+        """Run `sudo rm -f <paths>`, optionally piping password via stdin."""
+        cmd = ["sudo", "-S", "rm", "-f", *paths]
+        if sudo_password:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdin=asyncio.subprocess.PIPE,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+            )
+            assert proc.stdin is not None
+            proc.stdin.write(f"{sudo_password}\n".encode())
+            proc.stdin.close()
+        else:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdin=asyncio.subprocess.DEVNULL,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+            )
+        assert proc.stdout is not None
+        async for line in proc.stdout:
+            pass  # drain stdout so the process doesn't block
         await proc.wait()
+        return proc.returncode or 0
+
+    yield "Removing Ollama binary..."
+    binary = shutil.which("ollama")
+    if binary:
+        rc = await _sudo_rm(binary)
+        if rc != 0:
+            yield f"  Warning: sudo rm returned exit code {rc} — you may need to remove {binary} manually."
+    else:
+        yield "  Ollama binary not found in PATH — skipping."
 
     yield "Removing systemd service (if present)..."
-    for path in [
+    service_paths = [
         "/etc/systemd/system/ollama.service",
         "/usr/lib/systemd/system/ollama.service",
-    ]:
+    ]
+    existing = [p for p in service_paths if os.path.exists(p)]
+    if existing:
+        await _sudo_rm(*existing)
+
+    yield "Reloading systemd daemon (if present)..."
+    try:
         proc = await asyncio.create_subprocess_exec(
-            "sudo", "rm", "-f", path,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,
+            "sudo", "-S", "systemctl", "daemon-reload",
+            stdin=asyncio.subprocess.PIPE if sudo_password else asyncio.subprocess.DEVNULL,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
         )
+        if sudo_password and proc.stdin:
+            proc.stdin.write(f"{sudo_password}\n".encode())
+            proc.stdin.close()
         await proc.wait()
+    except FileNotFoundError:
+        pass  # systemctl not available (non-systemd or Windows)
 
     yield "Ollama removed."

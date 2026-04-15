@@ -173,7 +173,7 @@ class LMStudioServer(AbstractServer):
         yield "Download from: https://lmstudio.ai"
         yield "After installing, open LM Studio and enable 'Local Server' in settings."
 
-    async def uninstall(self) -> AsyncIterator[str]:
+    async def uninstall(self, sudo_password: str = "") -> AsyncIterator[str]:
         yield "Remove LM Studio manually via your package manager or the .AppImage file."
 
     # ------------------------------------------------------------------

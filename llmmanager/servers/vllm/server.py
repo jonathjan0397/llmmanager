@@ -197,7 +197,7 @@ class VLLMServer(AbstractServer):
         async for line in _installer.install(version):
             yield line
 
-    async def uninstall(self) -> AsyncIterator[str]:
+    async def uninstall(self, sudo_password: str = "") -> AsyncIterator[str]:
         async for line in _installer.uninstall():
             yield line
 

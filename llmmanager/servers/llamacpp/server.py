@@ -215,7 +215,7 @@ class LlamaCppServer(AbstractServer):
         async for line in _installer.install(version, cmake_args=cmake_args):
             yield line
 
-    async def uninstall(self) -> AsyncIterator[str]:
+    async def uninstall(self, sudo_password: str = "") -> AsyncIterator[str]:
         async for line in _installer.uninstall():
             yield line
 

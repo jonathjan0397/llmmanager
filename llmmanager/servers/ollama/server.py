@@ -213,8 +213,8 @@ class OllamaServer(AbstractServer):
         async for line in _installer.install(version, sudo_password=sudo_password):
             yield line
 
-    async def uninstall(self) -> AsyncIterator[str]:
-        async for line in _installer.uninstall():
+    async def uninstall(self, sudo_password: str = "") -> AsyncIterator[str]:
+        async for line in _installer.uninstall(sudo_password=sudo_password):
             yield line
 
     # ------------------------------------------------------------------

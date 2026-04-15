@@ -139,7 +139,7 @@ class AbstractServer(ABC):
         ...
 
     @abstractmethod
-    async def uninstall(self) -> AsyncIterator[str]:
+    async def uninstall(self, sudo_password: str = "") -> AsyncIterator[str]:
         """Stream uninstallation output lines."""
         ...
 

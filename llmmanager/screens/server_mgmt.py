@@ -11,6 +11,7 @@ from textual.widgets import Button, Input, Label, ListItem, ListView, Select, St
 
 from llmmanager.widgets.confirm_dialog import ConfirmDialog
 from llmmanager.widgets.flag_form import FlagForm
+from llmmanager.widgets.sudo_dialog import SudoDialog
 
 if TYPE_CHECKING:
     from llmmanager.app import LLMManagerApp
@@ -226,7 +227,10 @@ class ServerManagementScreen(Widget):
                 self._save_model_selection(server)
                 self.run_worker(self._start_with_model(server, restart=True))
             case "btn-install":
-                self.run_worker(self._stream_install(server, "latest"))
+                sudo_pw = await self._maybe_sudo(server)
+                if sudo_pw is False:
+                    return  # user cancelled password prompt
+                self.run_worker(self._stream_install(server, "latest", sudo_password=sudo_pw or ""))
             case "btn-uninstall":
                 confirmed = await self.app.push_screen_wait(
                     ConfirmDialog(
@@ -234,8 +238,14 @@ class ServerManagementScreen(Widget):
                         "This will remove the server binary/venv.",
                     )
                 )
-                if confirmed:
-                    self.run_worker(self._stream_install_output(server.uninstall()))
+                if not confirmed:
+                    return
+                sudo_pw = await self._maybe_sudo(server)
+                if sudo_pw is False:
+                    return  # user cancelled password prompt
+                self.run_worker(self._stream_install_output(
+                    server.uninstall(sudo_password=sudo_pw or "")
+                ))
             case "btn-apply":
                 self._save_flags(server)
                 self._save_model_selection(server)
@@ -316,13 +326,29 @@ class ServerManagementScreen(Widget):
         except Exception as exc:
             self.notify(str(exc), severity="error")
 
-    async def _stream_install(self, server: "AbstractServer", version: str) -> None:
+    async def _maybe_sudo(self, server: "AbstractServer") -> str | bool:
+        """
+        For servers that need sudo (Ollama), show a password dialog.
+        Returns the password string (may be empty if user left it blank),
+        or False if the user cancelled.
+        For servers that don't use sudo, returns "" immediately.
+        """
+        if server.name != "ollama":
+            return ""
+        result = await self.app.push_screen_wait(
+            SudoDialog(f"{server.display_name} install/uninstall requires sudo.")
+        )
+        if result is None:
+            return False  # cancelled
+        return result
+
+    async def _stream_install(self, server: "AbstractServer", version: str, sudo_password: str = "") -> None:
         scroll = self.query_one("#flag-form-scroll")
         scroll.remove_children()
         log = __import__("llmmanager.widgets.log_view", fromlist=["LogView"]).LogView(id="install-log")
         scroll.mount(log)
         try:
-            async for line in server.install(version):
+            async for line in server.install(version, sudo_password=sudo_password):
                 log.append_line(line)
         except Exception as exc:
             log.append_line(f"ERROR: {exc}")
