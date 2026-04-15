@@ -41,7 +41,12 @@ if TYPE_CHECKING:
 class BenchmarksScreen(Widget):
     """Screen 5 — run, compare, and review benchmarks."""
 
-    DEFAULT_CSS = "BenchmarksScreen { width: 1fr; height: 1fr; }"
+    DEFAULT_CSS = """
+    BenchmarksScreen { width: 1fr; height: 1fr; }
+    #bench-model-row { height: auto; }
+    #bench-model-row Select { width: 1fr; }
+    #btn-refresh-models { width: 5; margin-left: 1; }
+    """
 
     BINDINGS = [
         ("r", "run_benchmark",    "Run"),
@@ -63,8 +68,19 @@ class BenchmarksScreen(Widget):
                         value="ollama",
                         id="bench-server-select",
                     )
-                    yield Label("Model ID:", classes="form-label")
-                    yield Input(placeholder="e.g. llama3.2:3b", id="bench-model-input")
+                    yield Label("Model:", classes="form-label")
+                    with Horizontal(id="bench-model-row"):
+                        yield Select(
+                            options=[("—", "__none__")],
+                            value="__none__",
+                            id="bench-model-select",
+                        )
+                        yield Button("↻", id="btn-refresh-models", variant="default")
+                    yield Checkbox(
+                        "Auto-swap: unload current model and load selected before benchmark",
+                        value=True,
+                        id="bench-auto-swap",
+                    )
 
                     yield Label("Profile:", classes="form-label")
                     yield Select(
@@ -113,6 +129,27 @@ class BenchmarksScreen(Widget):
         table = self.query_one("#history-table", DataTable)
         table.add_columns("Timestamp", "Server", "Model", "TPS", "TTFT ms", "Max Concurrency", "Tier")
         self.run_worker(self._load_history(table))
+        self.run_worker(self._populate_model_select())
+
+    async def _populate_model_select(self) -> None:
+        app: LLMManagerApp = self.app  # type: ignore[assignment]
+        server_type = str(self.query_one("#bench-server-select", Select).value)
+        server = app.registry.get(server_type)
+        select = self.query_one("#bench-model-select", Select)
+        if server is None:
+            return
+        try:
+            models = await server.list_loaded_models()
+        except Exception:
+            models = []
+        if models:
+            select.set_options([(m.display_name, m.model_id) for m in models])
+        else:
+            select.set_options([("No models loaded — check Ollama is running", "__none__")])
+
+    def on_select_changed(self, event: Select.Changed) -> None:
+        if event.select.id == "bench-server-select":
+            self.run_worker(self._populate_model_select())
 
     async def _load_history(self, table: DataTable) -> None:
         if not BENCHMARK_DIR.exists():
@@ -140,16 +177,19 @@ class BenchmarksScreen(Widget):
                 await self._start_benchmark()
             case "btn-cancel-bench":
                 self._cancel_benchmark()
+            case "btn-refresh-models":
+                self.run_worker(self._populate_model_select())
 
     async def _start_benchmark(self) -> None:
         app: LLMManagerApp = self.app  # type: ignore[assignment]
 
         server_type = str(self.query_one("#bench-server-select", Select).value)
-        model_id = self.query_one("#bench-model-input", Input).value.strip()
+        model_id = str(self.query_one("#bench-model-select", Select).value)
         profile_val = str(self.query_one("#bench-profile-select", Select).value)
+        auto_swap = self.query_one("#bench-auto-swap", Checkbox).value
 
-        if not model_id:
-            self.notify("Enter a model ID.", severity="warning")
+        if not model_id or model_id == "__none__":
+            self.notify("Select a model first.", severity="warning")
             return
 
         server = app.registry.get(server_type)
@@ -179,15 +219,34 @@ class BenchmarksScreen(Widget):
         self.query_one("#btn-cancel-bench", Button).disabled = False
 
         self._current_run = asyncio.create_task(
-            self._run_benchmark_task(runner, config)
+            self._run_benchmark_task(runner, config, auto_swap=auto_swap)
         )
 
     async def _run_benchmark_task(
-        self, runner: BenchmarkRunner, config: BenchmarkConfig
+        self, runner: BenchmarkRunner, config: BenchmarkConfig, auto_swap: bool = False
     ) -> None:
         log = self.query_one("#bench-log", LogView)
         log.clear_log()
         progress_label = self.query_one("#bench-progress-label", Label)
+
+        # Auto-swap: unload other models, load the benchmark model
+        if auto_swap:
+            app: LLMManagerApp = self.app  # type: ignore[assignment]
+            server = app.registry.get(config.server_type)
+            if server:
+                try:
+                    loaded = await server.list_loaded_models()
+                    for m in loaded:
+                        if m.model_id != config.model_id:
+                            log.append_line(f"Unloading {m.model_id}…")
+                            await server.unload_model(m.model_id)
+                    already_loaded = any(m.model_id == config.model_id for m in loaded)
+                    if not already_loaded:
+                        log.append_line(f"Loading {config.model_id}…")
+                        await server.load_model(config.model_id)
+                        log.append_line(f"Model ready.")
+                except Exception as exc:
+                    log.append_line(f"[yellow]Warning: model swap failed: {exc}[/]")
 
         try:
             async for msg, result in runner.run(config):

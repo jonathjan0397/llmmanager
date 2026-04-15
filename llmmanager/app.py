@@ -15,6 +15,7 @@ from llmmanager.gpu.detector import detect_gpu_provider
 from llmmanager.notifications.manager import NotificationManager
 from llmmanager.screens.api_panel import APIPanelScreen
 from llmmanager.screens.benchmarks import BenchmarksScreen
+from llmmanager.screens.chat import ChatScreen
 from llmmanager.screens.dashboard import DashboardScreen
 from llmmanager.screens.logs import LogsScreen
 from llmmanager.screens.model_mgmt import ModelManagementScreen
@@ -41,6 +42,7 @@ class LLMManagerApp(App):
         Binding("5", "switch_tab('benchmarks')",   "Benchmarks",   show=True),
         Binding("6", "switch_tab('profiles')",     "Profiles",     show=True),
         Binding("7", "switch_tab('api')",          "API Panel",    show=True),
+        Binding("8", "switch_tab('chat')",         "Chat",         show=True),
         Binding("f1",  "show_help",     "Help",     show=False),
         Binding("f5",  "force_refresh", "Refresh",  show=False),
         Binding("f10", "quit",          "Quit",     show=True),
@@ -79,6 +81,8 @@ class LLMManagerApp(App):
                 yield ProfilesScreen()
             with TabPane("API Panel",  id="api"):
                 yield APIPanelScreen()
+            with TabPane("Chat",       id="chat"):
+                yield ChatScreen()
         yield Footer()
 
     async def on_mount(self) -> None:
