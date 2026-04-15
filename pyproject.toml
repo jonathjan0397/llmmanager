@@ -1,0 +1,64 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "llmmanager"
+version = "0.1.0"
+description = "TUI control panel for LLM server stacks on Linux"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+
+dependencies = [
+    # TUI framework
+    "textual>=0.70.0",
+    # Config / validation
+    "pydantic>=2.7.0",
+    "tomli-w>=1.0.0",
+    # Async HTTP
+    "httpx[http2]>=0.27.0",
+    "anyio>=4.4.0",
+    # GPU telemetry
+    "pynvml>=11.5.0",
+    # System metrics
+    "psutil>=6.0.0",
+    # HuggingFace Hub
+    "huggingface-hub>=0.23.0",
+    # Clipboard
+    "pyperclip>=1.8.2",
+    # Rich (explicit, bundled with textual but used directly)
+    "rich>=13.7.0",
+    # Date utilities
+    "python-dateutil>=2.9.0",
+    # Platform-specific config/data directories
+    "platformdirs>=4.0.0",
+    # Async file I/O (used by log tailer)
+    "aiofiles>=23.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.2.0",
+    "pytest-asyncio>=0.23.0",
+    "pytest-textual-snapshot>=0.4.0",
+    "respx>=0.21.0",
+    "ruff>=0.4.0",
+    "mypy>=1.10.0",
+]
+
+[project.scripts]
+llmmanager = "llmmanager.__main__:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["llmmanager"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"

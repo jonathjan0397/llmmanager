@@ -1,0 +1,129 @@
+/* Global layout, color variables, typography */
+
+$accent: #7c6af7;
+$surface: #1e1e2e;
+$background: #181825;
+$text: #cdd6f4;
+$text-muted: #6c7086;
+$success: #a6e3a1;
+$warning: #f9e2af;
+$error: #f38ba8;
+$primary: #89b4fa;
+
+Screen {
+    background: $background;
+    color: $text;
+}
+
+/* ---- Section headings ---- */
+.section-heading {
+    color: $accent;
+    text-style: bold;
+    margin: 1 0 0 0;
+    border-bottom: solid $surface;
+}
+
+/* ---- Toolbar ---- */
+#logs-toolbar {
+    height: 3;
+    background: $surface;
+    align: left middle;
+    padding: 0 1;
+}
+
+.toolbar-label {
+    color: $text-muted;
+    margin-right: 1;
+}
+
+/* ---- Status bar ---- */
+.status-bar {
+    background: $surface;
+    color: $text-muted;
+    height: 1;
+    padding: 0 1;
+}
+
+/* ---- Form ---- */
+.form-label {
+    color: $text-muted;
+    margin-top: 1;
+}
+
+.form-hint {
+    color: $text-muted;
+    text-style: italic;
+}
+
+/* ---- Server list panel ---- */
+#server-list-panel {
+    width: 20;
+    border-right: solid $surface;
+    padding: 0 1;
+}
+
+#flag-form-panel {
+    width: 1fr;
+    padding: 0 1;
+}
+
+/* ---- Wizard ---- */
+#wizard-title {
+    text-align: center;
+    text-style: bold;
+    color: $accent;
+    margin-bottom: 1;
+}
+
+#wizard-layout {
+    height: 1fr;
+}
+
+#wizard-left {
+    width: 35;
+    border-right: solid $surface;
+    padding: 0 1;
+}
+
+#wizard-right {
+    width: 1fr;
+    padding: 0 1;
+}
+
+/* ---- Dashboard ---- */
+#server-cards-row {
+    height: auto;
+}
+
+#gpu-meters-container {
+    height: auto;
+    max-height: 30;
+}
+
+#system-meters {
+    height: auto;
+    padding: 0 1;
+}
+
+/* ---- Benchmark ---- */
+#run-form {
+    height: 1fr;
+    padding: 0 1;
+}
+
+#run-controls {
+    height: auto;
+    margin-top: 1;
+}
+
+/* ---- Profile panel ---- */
+#profile-list-panel {
+    width: 1fr;
+    border-right: solid $surface;
+    padding: 0 1;
+}
+
+#profile-detail-panel {
+    width: 1fr;
+    padding: 0 1;
+}
