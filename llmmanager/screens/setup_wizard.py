@@ -82,32 +82,21 @@ class SetupWizardScreen(Screen):
     }
 
     /* ---- Password section ---- */
-    #password-section {
-        margin-top: 1;
-        padding: 1;
-        border: solid $primary-darken-2;
-        background: $surface-darken-1;
-        width: 100%;
-    }
-
     #sudo-password-label {
         color: $text-muted;
-        margin-bottom: 1;
+        margin-top: 1;
     }
 
     #sudo-password-input {
         width: 100%;
+        margin-bottom: 1;
     }
 
     /* ---- Action buttons ---- */
     #btn-preflight {
         width: 100%;
-        margin-top: 1;
-    }
-
-    #primary-action-group {
-        margin-top: 1;
-        width: 100%;
+        margin-top: 0;
+        margin-bottom: 1;
     }
 
     #btn-install-all {
@@ -149,19 +138,16 @@ class SetupWizardScreen(Screen):
                 yield Checkbox("vLLM",      value=False, id="install-vllm",     classes="server-checkbox")
                 yield Checkbox("LM Studio", value=False, id="install-lmstudio", classes="server-checkbox")
 
-                with Vertical(id="password-section"):
-                    yield Label("Sudo password", id="sudo-password-label")
-                    yield Input(
-                        placeholder="required for system install",
-                        password=True,
-                        id="sudo-password-input",
-                    )
+                yield Label("Sudo password", id="sudo-password-label")
+                yield Input(
+                    placeholder="required for system install",
+                    password=True,
+                    id="sudo-password-input",
+                )
 
-                yield Button("Run Pre-flight Checks", id="btn-preflight", variant="default")
-
-                with Vertical(id="primary-action-group"):
-                    yield Button("Install Selected", id="btn-install-all", variant="primary", disabled=True)
-                    yield Button("Skip Wizard",      id="btn-skip",        variant="default")
+                yield Button("Run Pre-flight Checks", id="btn-preflight",   variant="default")
+                yield Button("Install Selected",       id="btn-install-all", variant="primary")
+                yield Button("Skip Wizard",            id="btn-skip",        variant="default")
 
             # Right: pre-flight results + install log
             with VerticalScroll(id="wizard-right"):
@@ -231,7 +217,6 @@ class SetupWizardScreen(Screen):
                     all_ok = False
 
         results_widget.update("\n".join(lines))
-        self.query_one("#btn-install-all", Button).disabled = False
 
     async def _install_selected(self) -> None:
         app: LLMManagerApp = self.app  # type: ignore[assignment]
