@@ -106,10 +106,10 @@ check("notification manager", _notif)
 def _profiles():
     from llmmanager.config.manager import ConfigManager
     from llmmanager.config.schema import ProfileConfig
-    from datetime import datetime
+    from datetime import datetime, timezone
     cm = ConfigManager()
     cm.load()
-    now = datetime.utcnow().isoformat()
+    now = datetime.now(timezone.utc).isoformat()
     cm.config.profiles["test"] = ProfileConfig(
         name="test", created_at=now, updated_at=now
     )

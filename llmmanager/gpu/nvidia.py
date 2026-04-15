@@ -1,8 +1,9 @@
-"""NVIDIA GPU provider via pynvml."""
+"""NVIDIA GPU provider via pynvml (from nvidia-ml-py package)."""
 
 from __future__ import annotations
 
 import asyncio
+import warnings
 
 from llmmanager.exceptions import GPUQueryError
 from llmmanager.gpu.base import AbstractGPUProvider
@@ -15,7 +16,9 @@ class NvidiaProvider(AbstractGPUProvider):
     @classmethod
     def is_available(cls) -> bool:
         try:
-            import pynvml  # noqa: F401
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", FutureWarning)
+                import pynvml  # noqa: F401
             pynvml.nvmlInit()
             pynvml.nvmlShutdown()
             return True
@@ -26,7 +29,9 @@ class NvidiaProvider(AbstractGPUProvider):
         await asyncio.to_thread(self._init_sync)
 
     def _init_sync(self) -> None:
-        import pynvml
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", FutureWarning)
+            import pynvml
         pynvml.nvmlInit()
 
     async def get_all_gpus(self) -> list[GPUInfo]:
@@ -34,7 +39,9 @@ class NvidiaProvider(AbstractGPUProvider):
 
     def _query_sync(self) -> list[GPUInfo]:
         try:
-            import pynvml
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", FutureWarning)
+                import pynvml
             count = pynvml.nvmlDeviceGetCount()
             gpus: list[GPUInfo] = []
             for i in range(count):
@@ -110,7 +117,9 @@ class NvidiaProvider(AbstractGPUProvider):
 
     def _shutdown_sync(self) -> None:
         try:
-            import pynvml
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", FutureWarning)
+                import pynvml
             pynvml.nvmlShutdown()
         except Exception:
             pass
