@@ -50,8 +50,10 @@ class LLMManagerApp(App):
 
     def __init__(self) -> None:
         super().__init__()
-        # Core services — initialized in on_mount
+        # Config is loaded eagerly so it's available when child widgets mount
+        # (child on_mount handlers fire before App.on_mount in Textual).
         self.config_manager = ConfigManager()
+        self.config_manager.load()
         self.gpu_provider = detect_gpu_provider()
         self.registry = ServerRegistry(self.config_manager)
         self.poller: PollerService = None  # type: ignore[assignment]
@@ -80,7 +82,7 @@ class LLMManagerApp(App):
         yield Footer()
 
     async def on_mount(self) -> None:
-        cfg = self.config_manager.load()
+        cfg = self.config_manager.config
         self.registry.initialize()
         await self.gpu_provider.initialize()
         self.poller = PollerService(
