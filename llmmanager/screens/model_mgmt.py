@@ -111,8 +111,15 @@ class ModelManagementScreen(Widget):
     # ------------------------------------------------------------------
 
     def on_mount(self) -> None:
-        t = self.query_one("#installed-table", DataTable)
-        t.add_columns("Name", "Size", "Quant", "VRAM Est.", "Server", "Status")
+        self.query_one("#installed-table", DataTable).add_columns(
+            "Name", "Size", "Quant", "VRAM Est.", "Server", "Status"
+        )
+        self.query_one("#ollama-table", DataTable).add_columns(
+            "Name", "Tags", "Description"
+        )
+        self.query_one("#hf-table", DataTable).add_columns(
+            "Repo ID", "Tags", "Downloads"
+        )
         self.run_worker(self._load_installed())
         self.run_worker(self._watch_downloads())
 
@@ -121,15 +128,11 @@ class ModelManagementScreen(Widget):
     # ------------------------------------------------------------------
 
     def on_tabbed_content_tab_activated(self, event: TabbedContent.TabActivated) -> None:
+        if event.tab is None:
+            return
         if event.tab.id == "tab-ollama-lib" and not self._ollama_lib_loaded:
-            t = self.query_one("#ollama-table", DataTable)
-            if not t.columns:
-                t.add_columns("Name", "Tags", "Description")
             self.run_worker(self._load_ollama_library())
         elif event.tab.id == "tab-hf" and not self._hf_loaded:
-            t = self.query_one("#hf-table", DataTable)
-            if not t.columns:
-                t.add_columns("Repo ID", "Tags", "Downloads")
             self.run_worker(self._load_hf_library())
 
     # ------------------------------------------------------------------
