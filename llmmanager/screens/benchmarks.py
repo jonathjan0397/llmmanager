@@ -56,97 +56,63 @@ class BenchmarksScreen(Widget):
     def compose(self) -> ComposeResult:
         with TabbedContent(id="bench-tabs"):
             with TabPane("Run", id="tab-run"):
-                yield self._compose_run_tab()
+                with Vertical(id="run-form"):
+                    yield Label("Server:", classes="form-label")
+                    yield Select(
+                        options=[("Ollama", "ollama"), ("vLLM", "vllm")],
+                        value="ollama",
+                        id="bench-server-select",
+                    )
+                    yield Label("Model ID:", classes="form-label")
+                    yield Input(placeholder="e.g. llama3.2:3b", id="bench-model-input")
+
+                    yield Label("Profile:", classes="form-label")
+                    yield Select(
+                        options=[
+                            ("Quick (~2 min)",     "quick"),
+                            ("Standard (~10 min)", "standard"),
+                            ("Stress (full ramp)", "stress"),
+                        ],
+                        value="standard",
+                        id="bench-profile-select",
+                    )
+
+                    yield Label("Categories:", classes="form-label")
+                    for cat in BenchmarkCategory:
+                        yield Checkbox(
+                            cat.value.replace("_", " ").title(),
+                            value=True,
+                            id=f"cat-{cat.value}",
+                        )
+
+                    yield Label(
+                        f"Concurrency levels: {', '.join(str(x) for x in BENCHMARK_CONCURRENCY_LEVELS)}",
+                        classes="form-hint",
+                    )
+                    yield Label("", id="hw-snapshot-label", classes="form-hint")
+
+                    with Horizontal(id="run-controls"):
+                        yield Button("Run Benchmark", id="btn-run-bench", variant="primary")
+                        yield Button("Cancel", id="btn-cancel-bench", variant="error", disabled=True)
+
+                    yield Label("", id="bench-progress-label")
+                    yield ProgressBar(total=100, id="bench-progress-bar", show_eta=False)
+                    yield LogView(max_lines=200, id="bench-log")
 
             with TabPane("Results", id="tab-results"):
-                yield self._compose_results_tab()
+                yield Static(id="results-tab-content")
 
             with TabPane("History", id="tab-history"):
-                yield self._compose_history_tab()
+                yield DataTable(id="history-table", cursor_type="row")
+                yield Button("View Details", id="btn-view-history", variant="default")
 
             with TabPane("Compare", id="tab-compare"):
                 yield Label("Select two results in History to compare.", id="compare-placeholder")
 
-    def _compose_run_tab(self) -> Static:
-        return Static(id="run-tab-content")
-
-    def _compose_results_tab(self) -> Static:
-        return Static(id="results-tab-content")
-
-    def _compose_history_tab(self) -> Static:
-        return Static(id="history-tab-content")
-
     def on_mount(self) -> None:
-        self._build_run_tab()
-        self._build_history_tab()
-
-    def _build_run_tab(self) -> None:
-        run_content = self.query_one("#run-tab-content", Static)
-        run_content.remove_children()
-        run_content.mount(self._run_tab_widgets())
-
-    def _run_tab_widgets(self) -> Vertical:
-        v = Vertical(id="run-form")
-
-        # Server + model selection
-        v.mount(Label("Server:", classes="form-label"))
-        v.mount(Select(
-            options=[("Ollama", "ollama"), ("vLLM", "vllm")],
-            value="ollama",
-            id="bench-server-select",
-        ))
-        v.mount(Label("Model ID:", classes="form-label"))
-        v.mount(Input(placeholder="e.g. llama3.2:3b", id="bench-model-input"))
-
-        # Profile selection
-        v.mount(Label("Profile:", classes="form-label"))
-        v.mount(Select(
-            options=[
-                ("Quick (~2 min)",    "quick"),
-                ("Standard (~10 min)","standard"),
-                ("Stress (full ramp)","stress"),
-            ],
-            value="standard",
-            id="bench-profile-select",
-        ))
-
-        # Category toggles
-        v.mount(Label("Categories:", classes="form-label"))
-        for cat in BenchmarkCategory:
-            v.mount(Checkbox(cat.value.replace("_", " ").title(), value=True, id=f"cat-{cat.value}"))
-
-        v.mount(Label(
-            f"Concurrency levels: {', '.join(str(x) for x in BENCHMARK_CONCURRENCY_LEVELS)}",
-            classes="form-hint",
-        ))
-
-        # Hardware snapshot
-        v.mount(Label("", id="hw-snapshot-label", classes="form-hint"))
-
-        # Run controls
-        with Horizontal(id="run-controls"):
-            v.mount(Button("Run Benchmark", id="btn-run-bench", variant="primary"))
-            v.mount(Button("Cancel",        id="btn-cancel-bench", variant="error", disabled=True))
-
-        # Progress
-        v.mount(Label("", id="bench-progress-label"))
-        v.mount(ProgressBar(total=100, id="bench-progress-bar", show_eta=False))
-        v.mount(LogView(max_lines=200, id="bench-log"))
-
-        return v
-
-    def _build_history_tab(self) -> None:
-        hist = self.query_one("#history-tab-content", Static)
-        hist.remove_children()
-
-        table = DataTable(id="history-table", cursor_type="row")
+        table = self.query_one("#history-table", DataTable)
         table.add_columns("Timestamp", "Server", "Model", "TPS", "TTFT ms", "Max Concurrency", "Tier")
-        hist.mount(table)
-
-        # Load saved results
         self.run_worker(self._load_history(table))
-
-        hist.mount(Button("View Details", id="btn-view-history", variant="default"))
 
     async def _load_history(self, table: DataTable) -> None:
         if not BENCHMARK_DIR.exists():
@@ -191,11 +157,7 @@ class BenchmarksScreen(Widget):
             self.notify(f"Server '{server_type}' not found.", severity="error")
             return
 
-        categories = [
-            cat for cat in BenchmarkCategory
-            if self._cat_enabled(cat)
-        ]
-
+        categories = [cat for cat in BenchmarkCategory if self._cat_enabled(cat)]
         profile = BenchmarkProfile(profile_val)
         concurrency = BENCHMARK_CONCURRENCY_LEVELS
 
@@ -255,22 +217,25 @@ class BenchmarksScreen(Widget):
         results_content = self.query_one("#results-tab-content", Static)
         results_content.remove_children()
 
-        v = Vertical()
-        v.mount(Label(f"Model: {result.config.model_id}", classes="section-heading"))
-        v.mount(Label(f"Server: {result.config.server_type}"))
-        v.mount(Label(f"Tokens/sec: {result.tokens_per_sec:.2f}"))
-        v.mount(Label(f"TTFT: {result.ttft_ms:.0f} ms"))
-        v.mount(Label(f"VRAM delta: {result.vram_delta_mb:.0f} MB"))
-        v.mount(Label(f"Hardware tier: {result.hardware_tier or '—'}"))
+        # Build children list and pass to Vertical constructor — avoids mounting
+        # to an unattached widget (not supported in Textual 8.2.3+).
+        children: list[Widget] = [
+            Label(f"Model: {result.config.model_id}", classes="section-heading"),
+            Label(f"Server: {result.config.server_type}"),
+            Label(f"Tokens/sec: {result.tokens_per_sec:.2f}"),
+            Label(f"TTFT: {result.ttft_ms:.0f} ms"),
+            Label(f"VRAM delta: {result.vram_delta_mb:.0f} MB"),
+            Label(f"Hardware tier: {result.hardware_tier or '—'}"),
+        ]
 
         if result.recommended_max_concurrency:
-            v.mount(Label(
+            children.append(Label(
                 f"Recommended max concurrency: {result.recommended_max_concurrency}",
                 classes="section-heading",
             ))
 
         if result.concurrency_results:
-            v.mount(Label("Concurrency Results:", classes="section-heading"))
+            children.append(Label("Concurrency Results:", classes="section-heading"))
             table = DataTable(id="conc-results-table")
             table.add_columns(
                 "Concurrency", "Req/s", "TPS", "Latency p50", "Latency p99",
@@ -287,10 +252,10 @@ class BenchmarksScreen(Widget):
                     str(cr.failed),
                     "[red]ABORTED[/]" if cr.aborted else "[green]OK[/]",
                 )
-            v.mount(table)
+            children.append(table)
 
         if result.context_results:
-            v.mount(Label("Context Scaling:", classes="section-heading"))
+            children.append(Label("Context Scaling:", classes="section-heading"))
             ctx_table = DataTable(id="ctx-results-table")
             ctx_table.add_columns("Context Len", "TPS", "TTFT ms", "VRAM MB", "Error")
             for cr in result.context_results:
@@ -301,6 +266,6 @@ class BenchmarksScreen(Widget):
                     f"{cr.vram_mb:.0f}",
                     cr.error or "",
                 )
-            v.mount(ctx_table)
+            children.append(ctx_table)
 
-        results_content.mount(v)
+        results_content.mount(Vertical(*children))
