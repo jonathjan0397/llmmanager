@@ -20,36 +20,154 @@ class SetupWizardScreen(Screen):
 
     BINDINGS = [("escape", "skip_wizard", "Skip")]
 
+    DEFAULT_CSS = """
+    SetupWizardScreen {
+        background: $surface;
+    }
+
+    #wizard-title {
+        text-align: center;
+        text-style: bold;
+        color: $accent;
+        padding: 1 2;
+        width: 100%;
+    }
+
+    #wizard-subtitle {
+        text-align: center;
+        color: $text-muted;
+        padding: 0 2 1 2;
+        width: 100%;
+    }
+
+    #wizard-layout {
+        width: 100%;
+        height: 1fr;
+    }
+
+    #wizard-left {
+        width: 36;
+        min-width: 34;
+        padding: 0 1;
+        border-right: solid $primary-darken-2;
+    }
+
+    #wizard-right {
+        width: 1fr;
+        padding: 0 1;
+    }
+
+    /* ---- Section headings ---- */
+    .wizard-section-label {
+        text-style: bold;
+        color: $primary;
+        padding: 1 0 0 0;
+        border-bottom: solid $primary-darken-2;
+        width: 100%;
+    }
+
+    /* ---- Hardware summary ---- */
+    #hw-summary {
+        color: $text;
+        padding: 1 1;
+        margin-bottom: 1;
+        background: $surface-darken-1;
+        border: solid $primary-darken-3;
+        width: 100%;
+    }
+
+    /* ---- Server checkboxes ---- */
+    .server-checkbox {
+        margin: 0 0 0 1;
+    }
+
+    /* ---- Password section ---- */
+    #password-section {
+        margin-top: 1;
+        padding: 1;
+        border: solid $primary-darken-2;
+        background: $surface-darken-1;
+        width: 100%;
+    }
+
+    #sudo-password-label {
+        color: $text-muted;
+        margin-bottom: 1;
+    }
+
+    #sudo-password-input {
+        width: 100%;
+    }
+
+    /* ---- Action buttons ---- */
+    #btn-preflight {
+        width: 100%;
+        margin-top: 1;
+    }
+
+    #primary-action-group {
+        margin-top: 1;
+        width: 100%;
+    }
+
+    #btn-install-all {
+        width: 100%;
+        margin-bottom: 1;
+    }
+
+    #btn-skip {
+        width: 100%;
+        color: $text-muted;
+    }
+
+    /* ---- Right panel ---- */
+    #preflight-results {
+        padding: 1;
+        background: $surface-darken-1;
+        border: solid $primary-darken-3;
+        width: 100%;
+        min-height: 5;
+        margin-bottom: 1;
+    }
+    """
+
     def compose(self) -> ComposeResult:
-        yield Label("LLM Manager — Setup Wizard", id="wizard-title", classes="section-heading")
-        yield Label("Detected hardware will appear below. Select servers to install.", id="wizard-subtitle")
+        yield Label("LLM Manager — Setup Wizard", id="wizard-title")
+        yield Label(
+            "Detect hardware, run pre-flight checks, then install selected servers.",
+            id="wizard-subtitle",
+        )
 
         with Horizontal(id="wizard-layout"):
-            # Left: hardware + server selection
+            # Left: hardware + server selection + actions
             with Vertical(id="wizard-left"):
-                yield Label("Hardware", classes="section-heading")
-                yield Static("", id="hw-summary")
+                yield Label("Hardware", classes="wizard-section-label")
+                yield Static("Detecting...", id="hw-summary")
 
-                yield Label("Servers to Install", classes="section-heading")
-                yield Checkbox("Ollama",    value=True,  id="install-ollama")
-                yield Checkbox("vLLM",      value=False, id="install-vllm")
-                yield Checkbox("LM Studio", value=False, id="install-lmstudio")
+                yield Label("Servers to Install", classes="wizard-section-label")
+                yield Checkbox("Ollama",    value=True,  id="install-ollama",   classes="server-checkbox")
+                yield Checkbox("vLLM",      value=False, id="install-vllm",     classes="server-checkbox")
+                yield Checkbox("LM Studio", value=False, id="install-lmstudio", classes="server-checkbox")
 
-                yield Label("Sudo password:", classes="form-label")
-                yield Input(
-                    placeholder="required for system install",
-                    password=True,
-                    id="sudo-password-input",
-                )
+                with Vertical(id="password-section"):
+                    yield Label("Sudo password", id="sudo-password-label")
+                    yield Input(
+                        placeholder="required for system install",
+                        password=True,
+                        id="sudo-password-input",
+                    )
+
                 yield Button("Run Pre-flight Checks", id="btn-preflight", variant="default")
-                yield Button("Install Selected",      id="btn-install-all", variant="primary", disabled=True)
-                yield Button("Skip Wizard",           id="btn-skip", variant="default")
+
+                with Vertical(id="primary-action-group"):
+                    yield Button("Install Selected", id="btn-install-all", variant="primary", disabled=True)
+                    yield Button("Skip Wizard",      id="btn-skip",        variant="default")
 
             # Right: pre-flight results + install log
             with VerticalScroll(id="wizard-right"):
-                yield Label("Pre-flight Checks", classes="section-heading")
-                yield Static("", id="preflight-results")
-                yield Label("Install Log", classes="section-heading")
+                yield Label("Pre-flight Checks", classes="wizard-section-label")
+                yield Static("Run pre-flight checks to see results here.", id="preflight-results")
+                yield Label("Install Log", classes="wizard-section-label")
                 yield LogView(max_lines=300, id="wizard-log")
 
     def on_mount(self) -> None:
