@@ -80,6 +80,19 @@ class LLMManagerApp(App):
         yield Footer()
 
     async def on_mount(self) -> None:
+        import traceback as _tb
+        try:
+            await self._mount_impl()
+        except Exception:
+            err = _tb.format_exc()
+            try:
+                from pathlib import Path
+                Path("/tmp/llmmanager_mount_err.txt").write_text(err)
+            except Exception:
+                pass
+            raise
+
+    async def _mount_impl(self) -> None:
         # Load config
         cfg = self.config_manager.load()
 
