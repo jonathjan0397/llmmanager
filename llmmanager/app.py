@@ -58,6 +58,7 @@ class LLMManagerApp(App):
         self.config_manager.load()
         self.gpu_provider = detect_gpu_provider()
         self.registry = ServerRegistry(self.config_manager)
+        self.registry.initialize()  # Must happen before child on_mount handlers fire
         self.poller: PollerService = None  # type: ignore[assignment]
         self.log_tailer = LogTailerService()
         self.download_manager = DownloadManager()
@@ -87,7 +88,6 @@ class LLMManagerApp(App):
 
     async def on_mount(self) -> None:
         cfg = self.config_manager.config
-        self.registry.initialize()
         await self.gpu_provider.initialize()
         self.poller = PollerService(
             gpu_provider=self.gpu_provider,

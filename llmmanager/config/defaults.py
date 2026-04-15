@@ -5,6 +5,7 @@ from llmmanager.constants import (
     OLLAMA_DEFAULT_PORT,
     VLLM_DEFAULT_PORT,
     LMSTUDIO_DEFAULT_PORT,
+    LLAMACPP_DEFAULT_PORT,
 )
 
 
@@ -35,8 +36,18 @@ def default_lmstudio_config() -> ServerConfig:
     )
 
 
+def default_llamacpp_config() -> ServerConfig:
+    return ServerConfig(
+        server_type="llamacpp",
+        port=LLAMACPP_DEFAULT_PORT,
+        enabled=True,
+        auto_start=False,
+    )
+
+
 SERVER_DEFAULTS: dict[str, ServerConfig] = {
     "ollama": default_ollama_config(),
     "vllm": default_vllm_config(),
     "lmstudio": default_lmstudio_config(),
+    "llamacpp": default_llamacpp_config(),
 }

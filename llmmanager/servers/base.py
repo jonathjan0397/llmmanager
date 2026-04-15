@@ -108,9 +108,10 @@ class AbstractServer(ABC):
 
     @abstractmethod
     async def quick_infer(
-        self, model_id: str, prompt: str
+        self, model_id: str, prompt: str, **kwargs
     ) -> AsyncIterator[str]:
-        """Stream a response for a single prompt. Used by API panel."""
+        """Stream a response for a single prompt. Used by API panel and benchmarks.
+        kwargs are passed to the underlying API (e.g. num_predict=200)."""
         ...
 
     # ------------------------------------------------------------------

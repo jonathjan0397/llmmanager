@@ -51,6 +51,9 @@ class ServerConfig(BaseModel):
     flags: dict[str, Any] = Field(default_factory=dict)
     """CLI flag overrides: flag_name -> value. Passed verbatim at launch."""
 
+    default_model: str | None = None
+    """Model to auto-load after server starts. For vLLM this maps to --model."""
+
     extra_env: dict[str, str] = Field(default_factory=dict)
     """Additional environment variables injected into the server process."""
 

@@ -123,7 +123,9 @@ class BenchmarkRunner:
             first_token_time: float | None = None
             token_count = 0
 
-            async for token in self._server.quick_infer(config.model_id, config.prompt):
+            async for token in self._server.quick_infer(
+                config.model_id, config.prompt, num_predict=config.n_tokens
+            ):
                 if first_token_time is None:
                     first_token_time = time.monotonic()
                 token_count += len(token.split())
@@ -185,16 +187,20 @@ class BenchmarkRunner:
             for _ in range(level)
         ]
 
-        # Use sustained mode — maintain N concurrent for the duration
-        if level > 8:
-            # For high concurrency, run sustained test
-            deadline = start + config.safety_max_p99_latency_ms / 1000.0
+        # Cap every level — prevents indefinite hang on slow/CPU-only hardware
+        per_level_timeout = min(
+            config.sustained_duration_s,
+            config.safety_max_p99_latency_ms / 1000.0,
+        )
+        try:
             results_raw = await asyncio.wait_for(
                 asyncio.gather(*tasks, return_exceptions=True),
-                timeout=config.sustained_duration_s,
+                timeout=per_level_timeout,
             )
-        else:
-            results_raw = await asyncio.gather(*tasks, return_exceptions=True)
+        except asyncio.TimeoutError:
+            for t in tasks:
+                t.cancel()
+            results_raw = [asyncio.TimeoutError(f"timed out after {per_level_timeout:.0f}s")] * level
 
         total_ms = (time.monotonic() - start) * 1000
         vram_after = await self._current_vram_mb()
@@ -248,7 +254,9 @@ class BenchmarkRunner:
         first_token_time: float | None = None
         token_count = 0
         try:
-            async for token in self._server.quick_infer(config.model_id, config.prompt):
+            async for token in self._server.quick_infer(
+                config.model_id, config.prompt, num_predict=config.n_tokens
+            ):
                 if first_token_time is None:
                     first_token_time = time.monotonic()
                 token_count += len(token.split())

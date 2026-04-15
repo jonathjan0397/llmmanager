@@ -9,9 +9,8 @@ import psutil
 from textual.app import ComposeResult
 from textual.containers import Horizontal, ScrollableContainer, Vertical
 from textual.widget import Widget
-from textual.widgets import Label, ProgressBar, Static
+from textual.widgets import Button, Label, ProgressBar, Select, Static
 
-from textual.widgets import Button, Input, Select
 from llmmanager.widgets.gpu_meter import GPUMeter
 from llmmanager.widgets.server_card import ServerCard
 
@@ -27,7 +26,7 @@ class DashboardScreen(Widget):
 
     #quick-load-box {
         height: auto;
-        border: solid $primary-darken-2;
+        border: ascii $primary-darken-2;
         background: $surface-darken-1;
         padding: 1;
         margin-top: 1;
@@ -37,17 +36,18 @@ class DashboardScreen(Widget):
         height: auto;
     }
 
-    #quick-load-row Label   { margin: 1 1 0 0; }
-    #quick-load-row Select  { width: 16; margin-right: 1; }
-    #ql-model-input         { width: 1fr; }
-    #btn-ql-load            { width: 10; margin-left: 1; }
-    #btn-ql-unload          { width: 10; margin-left: 1; }
-    #ql-status              { color: $text-muted; margin-top: 0; }
+    #quick-load-row Label  { margin: 1 1 0 0; }
+    #ql-server-select      { width: 14; margin-right: 1; }
+    #ql-model-select       { width: 1fr; }
+    #btn-ql-refresh        { width: 3; margin-left: 1; }
+    #btn-ql-load           { width: 10; margin-left: 1; }
+    #btn-ql-unload         { width: 10; margin-left: 1; }
+    #ql-status             { color: $text-muted; margin-top: 0; }
     """
 
     BINDINGS = [
         ("r", "restart_selected", "Restart server"),
-        ("f5", "force_refresh", "Refresh now"),
+        ("f5", "force_refresh",   "Refresh now"),
     ]
 
     def compose(self) -> ComposeResult:
@@ -56,10 +56,10 @@ class DashboardScreen(Widget):
             yield ServerCard("ollama")
             yield ServerCard("vllm")
             yield ServerCard("lmstudio")
+            yield ServerCard("llamacpp")
 
         yield Label("GPU", id="dash-gpu-heading", classes="section-heading")
         with ScrollableContainer(id="gpu-meters-container"):
-            # GPU meters are added dynamically in on_mount
             pass
 
         yield Label("Quick Load Model", classes="section-heading")
@@ -67,13 +67,25 @@ class DashboardScreen(Widget):
             with Horizontal(id="quick-load-row"):
                 yield Label("Server:")
                 yield Select(
-                    options=[("Ollama", "ollama"), ("vLLM", "vllm"), ("LM Studio", "lmstudio")],
+                    options=[
+                        ("Ollama",    "ollama"),
+                        ("vLLM",      "vllm"),
+                        ("LM Studio", "lmstudio"),
+                        ("llama.cpp", "llamacpp"),
+                    ],
                     value="ollama",
                     id="ql-server-select",
                 )
-                yield Input(placeholder="model name, e.g. llama3.2:3b", id="ql-model-input")
-                yield Button("Load",   id="btn-ql-load",   variant="success")
-                yield Button("Unload", id="btn-ql-unload", variant="warning")
+                yield Label("Model:")
+                yield Select(
+                    options=[("—", "__none__")],
+                    value="__none__",
+                    id="ql-model-select",
+                )
+                yield Button("↻",      id="btn-ql-refresh", variant="default",
+                             tooltip="Refresh model list")
+                yield Button("Load",   id="btn-ql-load",    variant="success")
+                yield Button("Unload", id="btn-ql-unload",  variant="warning")
             yield Label("", id="ql-status")
 
         yield Label("System", id="dash-system-heading", classes="section-heading")
@@ -85,6 +97,36 @@ class DashboardScreen(Widget):
 
     def on_mount(self) -> None:
         self._update_task = self.set_interval(2.0, self._refresh)
+        self.run_worker(self._populate_model_select())
+
+    # ------------------------------------------------------------------
+    # Model select population
+    # ------------------------------------------------------------------
+
+    async def _populate_model_select(self) -> None:
+        app: LLMManagerApp = self.app  # type: ignore[assignment]
+        server_type = str(self.query_one("#ql-server-select", Select).value)
+        server = app.registry.get(server_type)
+        select = self.query_one("#ql-model-select", Select)
+        if server is None:
+            select.set_options([("—", "__none__")])
+            return
+        try:
+            models = await server.list_loaded_models()
+        except Exception:
+            models = []
+        if models:
+            select.set_options([(m.display_name, m.model_id) for m in models])
+        else:
+            select.set_options([("No models available", "__none__")])
+
+    def on_select_changed(self, event: Select.Changed) -> None:
+        if event.select.id == "ql-server-select":
+            self.run_worker(self._populate_model_select())
+
+    # ------------------------------------------------------------------
+    # Dashboard refresh
+    # ------------------------------------------------------------------
 
     async def _refresh(self) -> None:
         app: LLMManagerApp = self.app  # type: ignore[assignment]
@@ -93,7 +135,6 @@ class DashboardScreen(Widget):
         except asyncio.QueueEmpty:
             return
 
-        # Update server cards
         for info in snapshot.servers:
             try:
                 card = self.query_one(f"#card-{info.server_type}", ServerCard)
@@ -101,7 +142,6 @@ class DashboardScreen(Widget):
             except Exception:
                 pass
 
-        # Update GPU meters — add new ones if we see new GPU indices
         container = self.query_one("#gpu-meters-container")
         for gpu in snapshot.gpus:
             meter_id = f"gpu-meter-{gpu.index}"
@@ -112,7 +152,6 @@ class DashboardScreen(Widget):
                 container.mount(meter)
             meter.update_gpu(gpu)
 
-        # Update system meters
         self.query_one("#cpu-label", Label).update(
             f"CPU   {snapshot.cpu_pct:.1f}%"
         )
@@ -127,20 +166,26 @@ class DashboardScreen(Widget):
         ram_bar = self.query_one("#ram-bar", ProgressBar)
         ram_bar.advance(ram_pct - (ram_bar.progress or 0))
 
+    # ------------------------------------------------------------------
+    # Button handler
+    # ------------------------------------------------------------------
+
     async def on_button_pressed(self, event: Button.Pressed) -> None:
         match event.button.id:
             case "btn-ql-load":
                 await self._quick_load()
             case "btn-ql-unload":
                 await self._quick_unload()
+            case "btn-ql-refresh":
+                self.run_worker(self._populate_model_select())
 
     async def _quick_load(self) -> None:
         app: LLMManagerApp = self.app  # type: ignore[assignment]
         status = self.query_one("#ql-status", Label)
         server_type = str(self.query_one("#ql-server-select", Select).value)
-        model_id = self.query_one("#ql-model-input", Input).value.strip()
-        if not model_id:
-            status.update("[red]Enter a model name.[/]")
+        model_id = str(self.query_one("#ql-model-select", Select).value)
+        if not model_id or model_id == "__none__":
+            status.update("[red]Select a model first.[/]")
             return
         server = app.registry.get(server_type)
         if server is None:
@@ -149,7 +194,7 @@ class DashboardScreen(Widget):
         status.update(f"Loading {model_id}…")
         try:
             await server.load_model(model_id)
-            status.update(f"[green]✓ {model_id} loaded.[/]")
+            status.update(f"[green]+ {model_id} loaded.[/]")
         except Exception as exc:
             status.update(f"[red]Error: {exc}[/]")
 
@@ -157,9 +202,9 @@ class DashboardScreen(Widget):
         app: LLMManagerApp = self.app  # type: ignore[assignment]
         status = self.query_one("#ql-status", Label)
         server_type = str(self.query_one("#ql-server-select", Select).value)
-        model_id = self.query_one("#ql-model-input", Input).value.strip()
-        if not model_id:
-            status.update("[red]Enter a model name.[/]")
+        model_id = str(self.query_one("#ql-model-select", Select).value)
+        if not model_id or model_id == "__none__":
+            status.update("[red]Select a model first.[/]")
             return
         server = app.registry.get(server_type)
         if server is None:
@@ -168,7 +213,7 @@ class DashboardScreen(Widget):
         status.update(f"Unloading {model_id}…")
         try:
             await server.unload_model(model_id)
-            status.update(f"[yellow]✓ {model_id} unloaded.[/]")
+            status.update(f"[yellow]- {model_id} unloaded.[/]")
         except Exception as exc:
             status.update(f"[red]Error: {exc}[/]")
 

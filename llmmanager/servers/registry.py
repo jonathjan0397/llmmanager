@@ -23,11 +23,13 @@ class ServerRegistry:
         from llmmanager.servers.ollama.server import OllamaServer
         from llmmanager.servers.vllm.server import VLLMServer
         from llmmanager.servers.lmstudio.server import LMStudioServer
+        from llmmanager.servers.llamacpp.server import LlamaCppServer
 
         _BACKEND_MAP: dict[str, type[AbstractServer]] = {
             "ollama": OllamaServer,
             "vllm": VLLMServer,
             "lmstudio": LMStudioServer,
+            "llamacpp": LlamaCppServer,
         }
 
         cfg = self._config_manager.config

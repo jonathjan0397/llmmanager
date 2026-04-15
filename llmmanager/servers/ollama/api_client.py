@@ -64,6 +64,18 @@ class OllamaAPIClient:
                 if line.strip():
                     yield json.loads(line)
 
+    async def unload_model(self, model_name: str) -> None:
+        """Signal Ollama to evict a model from memory immediately."""
+        r = await self._client.post(
+            "/api/generate",
+            json={"model": model_name, "keep_alive": 0, "prompt": ""},
+            timeout=httpx.Timeout(connect=HTTP_CONNECT_TIMEOUT, read=30.0, write=10.0, pool=5.0),
+        )
+        r.raise_for_status()
+        data = r.json()
+        if data.get("done_reason") not in ("unload", "stop") and not data.get("done"):
+            raise RuntimeError(f"Unexpected unload response: {data}")
+
     async def delete_model(self, model_name: str) -> None:
         r = await self._client.request("DELETE", "/api/delete", json={"name": model_name})
         r.raise_for_status()
@@ -86,14 +98,33 @@ class OllamaAPIClient:
                 pool=5.0,
             ),
         ) as resp:
-            resp.raise_for_status()
+            if resp.status_code >= 400:
+                body = await resp.aread()
+                try:
+                    err_msg = json.loads(body).get("error", body.decode())
+                except Exception:
+                    err_msg = body.decode() or f"HTTP {resp.status_code}"
+                raise httpx.HTTPStatusError(
+                    f"Ollama error {resp.status_code}: {err_msg}",
+                    request=resp.request,
+                    response=resp,
+                )
             async for line in resp.aiter_lines():
                 if line.strip():
                     chunk = json.loads(line)
+                    if chunk.get("error"):
+                        raise RuntimeError(f"Ollama: {chunk['error']}")
                     if token := chunk.get("response"):
                         yield token
                     if chunk.get("done"):
                         break
+
+    # Inference parameters that must go under the "options" key for /api/chat
+    _CHAT_OPTIONS = frozenset({
+        "num_predict", "temperature", "top_p", "top_k", "repeat_penalty",
+        "seed", "num_ctx", "stop", "tfs_z", "mirostat", "mirostat_tau",
+        "mirostat_eta", "penalize_newline", "num_keep",
+    })
 
     async def chat_stream(
         self,
@@ -101,7 +132,14 @@ class OllamaAPIClient:
         messages: list[dict[str, str]],
         **kwargs: Any,
     ) -> AsyncIterator[str]:
-        payload = {"model": model, "messages": messages, "stream": True, **kwargs}
+        # Split kwargs: inference options go under "options", rest stay top-level
+        options = {k: v for k, v in kwargs.items() if k in self._CHAT_OPTIONS}
+        top_level = {k: v for k, v in kwargs.items() if k not in self._CHAT_OPTIONS}
+        payload: dict[str, Any] = {
+            "model": model, "messages": messages, "stream": True, **top_level
+        }
+        if options:
+            payload["options"] = options
         async with self._client.stream(
             "POST",
             "/api/chat",
@@ -113,10 +151,22 @@ class OllamaAPIClient:
                 pool=5.0,
             ),
         ) as resp:
-            resp.raise_for_status()
+            if resp.status_code >= 400:
+                body = await resp.aread()
+                try:
+                    err_msg = json.loads(body).get("error", body.decode())
+                except Exception:
+                    err_msg = body.decode() or f"HTTP {resp.status_code}"
+                raise httpx.HTTPStatusError(
+                    f"Ollama error {resp.status_code}: {err_msg}",
+                    request=resp.request,
+                    response=resp,
+                )
             async for line in resp.aiter_lines():
                 if line.strip():
                     chunk = json.loads(line)
+                    if chunk.get("error"):
+                        raise RuntimeError(f"Ollama: {chunk['error']}")
                     if content := chunk.get("message", {}).get("content"):
                         yield content
                     if chunk.get("done"):

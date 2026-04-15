@@ -5,13 +5,14 @@ from __future__ import annotations
 import time
 from typing import TYPE_CHECKING
 
+from rich.markup import escape as rich_escape
+
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.widget import Widget
 from textual.widgets import Button, Input, Label, Select, Static
 
 from llmmanager.models.server import ServerState
-from llmmanager.widgets.log_view import LogView
 
 if TYPE_CHECKING:
     from llmmanager.app import LLMManagerApp
@@ -80,6 +81,7 @@ class APIPanelScreen(Widget):
     #infer-controls Label { margin: 1 1 0 0; }
     #infer-controls Select { width: 20; margin-right: 1; }
     #infer-model-select { width: 26; }
+    #btn-refresh-models { width: 3; margin-left: 1; }
 
     #infer-prompt-input { width: 1fr; margin-bottom: 1; }
 
@@ -88,6 +90,17 @@ class APIPanelScreen(Widget):
     #infer-latency { margin-left: 2; color: $text-muted; }
 
     #btn-refresh-api { width: 12; margin-left: 1; }
+
+    #infer-response-scroll {
+        height: 1fr;
+        border: solid $primary-darken-2;
+        background: $surface-darken-1;
+        padding: 1;
+    }
+
+    #infer-response {
+        width: 1fr;
+    }
     """
 
     BINDINGS = [("r", "refresh_endpoints", "Refresh")]
@@ -103,7 +116,7 @@ class APIPanelScreen(Widget):
                 with Horizontal(id="infer-controls"):
                     yield Label("Server:")
                     yield Select(
-                        options=[("Ollama", "ollama"), ("vLLM", "vllm"), ("LM Studio", "lmstudio")],
+                        options=[("Ollama", "ollama"), ("vLLM", "vllm"), ("LM Studio", "lmstudio"), ("llama.cpp", "llamacpp")],
                         value="ollama",
                         id="infer-server-select",
                     )
@@ -113,6 +126,7 @@ class APIPanelScreen(Widget):
                         value="__none__",
                         id="infer-model-select",
                     )
+                    yield Button("↻", id="btn-refresh-models", variant="default", tooltip="Refresh model list")
 
                 yield Input(
                     placeholder="Enter your prompt here…",
@@ -123,7 +137,8 @@ class APIPanelScreen(Widget):
                     yield Button("Refresh", id="btn-refresh-api", variant="default")
                     yield Label("", id="infer-latency")
 
-                yield LogView(max_lines=200, id="infer-response")
+                with VerticalScroll(id="infer-response-scroll"):
+                    yield Static("", id="infer-response")
 
     def on_mount(self) -> None:
         self.run_worker(self._refresh_all())
@@ -201,6 +216,8 @@ class APIPanelScreen(Widget):
         match event.button.id:
             case "btn-send-infer":
                 await self._run_inference()
+            case "btn-refresh-models":
+                self.run_worker(self._populate_model_select())
             case "btn-refresh-api":
                 self.run_worker(self._refresh_all())
 
@@ -222,17 +239,21 @@ class APIPanelScreen(Widget):
             self.notify(f"Server '{server_type}' not configured.", severity="error")
             return
 
-        log = self.query_one("#infer-response", LogView)
-        log.clear_log()
+        response = self.query_one("#infer-response", Static)
+        scroll = self.query_one("#infer-response-scroll", VerticalScroll)
+        response.update("")
         latency = self.query_one("#infer-latency", Label)
         latency.update("Running…")
 
         start = time.monotonic()
+        full = ""
         try:
             async for token in server.quick_infer(model_id, prompt):
-                log.append_line(token)
+                full += token
+                response.update(rich_escape(full))
+                scroll.scroll_end(animate=False)
         except Exception as exc:
-            log.append_line(f"ERROR: {exc}")
+            response.update(f"[red]ERROR: {rich_escape(str(exc))}[/]")
 
         elapsed_ms = (time.monotonic() - start) * 1000
         latency.update(f"{elapsed_ms:.0f} ms")

@@ -1,20 +1,20 @@
 /* =========================================================
-   LLM Manager — Global Stylesheet
+   LLM Manager -- Terminal Green/Black Theme
    ========================================================= */
 
 /* ---- Color palette ---- */
-$accent:          #7c6af7;
-$surface:         #1e1e2e;
-$surface-darken-1:#181825;
-$background:      #11111b;
-$text:            #cdd6f4;
-$text-muted:      #6c7086;
-$success:         #a6e3a1;
-$warning:         #f9e2af;
-$error:           #f38ba8;
-$primary:         #89b4fa;
-$primary-darken-2:#45475a;
-$primary-darken-3:#313244;
+$accent:          #00ff41;
+$surface:         #0a1a0a;
+$surface-darken-1:#060e06;
+$background:      #000000;
+$text:            #00cc33;
+$text-muted:      #007722;
+$success:         #00ff41;
+$warning:         #ffff00;
+$error:           #ff2222;
+$primary:         #00dd33;
+$primary-darken-2:#003311;
+$primary-darken-3:#001a08;
 
 /* ---- Root ---- */
 Screen {
@@ -37,7 +37,7 @@ TabPane {
     text-style: bold;
     padding: 0 0 0 0;
     margin: 1 0 1 0;
-    border-bottom: solid $primary-darken-2;
+    border-bottom: ascii $primary-darken-2;
     width: 100%;
 }
 
@@ -56,6 +56,7 @@ TabPane {
 Input {
     background: $surface;
     border: tall $primary-darken-2;
+    color: $text;
 }
 
 Input:focus {
@@ -64,11 +65,16 @@ Input:focus {
 
 Select {
     background: $surface;
+    color: $text;
 }
 
 /* ---- Buttons ---- */
 Button {
     margin: 0 1 0 0;
+}
+
+Button.success {
+    color: $success;
 }
 
 /* ---- Status bar ---- */
@@ -111,7 +117,7 @@ Button {
 /* ---- Server card ---- */
 ServerCard {
     height: auto;
-    border: round $primary-darken-2;
+    border: ascii $primary-darken-2;
     padding: 1 2;
     margin: 0 1 1 0;
     min-width: 26;
@@ -121,7 +127,7 @@ ServerCard {
 /* ---- Server management ---- */
 #server-list-panel {
     width: 22;
-    border-right: solid $primary-darken-2;
+    border-right: ascii $primary-darken-2;
     padding: 0 1;
     background: $surface;
 }
@@ -150,7 +156,7 @@ ServerCard {
 
 #wizard-left {
     width: 36;
-    border-right: solid $primary-darken-2;
+    border-right: ascii $primary-darken-2;
     padding: 0 1;
 }
 
@@ -162,7 +168,7 @@ ServerCard {
 /* ---- Profile panel ---- */
 #profile-list-panel {
     width: 1fr;
-    border-right: solid $primary-darken-2;
+    border-right: ascii $primary-darken-2;
     background: $surface;
     padding: 0 1;
 }
@@ -175,12 +181,12 @@ ServerCard {
 /* ---- DataTable ---- */
 DataTable {
     height: 1fr;
-    border: solid $primary-darken-2;
+    border: ascii $primary-darken-2;
 }
 
 /* ---- Log view ---- */
 LogView {
-    border: solid $primary-darken-2;
+    border: ascii $primary-darken-2;
     background: $surface-darken-1;
 }
 
@@ -193,6 +199,33 @@ Footer {
 /* ---- Header ---- */
 Header {
     background: $surface;
-    color: $primary;
+    color: $accent;
     text-style: bold;
+}
+
+/* ---- Dialogs ---- */
+ConfirmDialog > Vertical {
+    border: ascii $accent;
+}
+
+/* ---- ListView ---- */
+ListView {
+    background: $surface;
+    border: ascii $primary-darken-2;
+}
+
+ListItem {
+    background: $surface;
+    color: $text;
+}
+
+ListItem:hover {
+    background: $primary-darken-2;
+}
+
+/* ---- OptionList (Select dropdown) ---- */
+OptionList {
+    background: $surface;
+    border: ascii $accent;
+    color: $text;
 }

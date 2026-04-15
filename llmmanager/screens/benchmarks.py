@@ -1,9 +1,11 @@
-"""Benchmark Suite screen — full hardware-aware benchmark runner."""
+"""Benchmark Suite screen — multi-model benchmark runner with comparison charts."""
 
 from __future__ import annotations
 
 import asyncio
 import json
+import re
+from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -14,12 +16,11 @@ from textual.widgets import (
     Button,
     Checkbox,
     DataTable,
-    Input,
     Label,
     ProgressBar,
     Select,
+    SelectionList,
     Static,
-    Tab,
     TabbedContent,
     TabPane,
 )
@@ -31,6 +32,8 @@ from llmmanager.models.benchmark import (
     BenchmarkConfig,
     BenchmarkProfile,
     BenchmarkResult,
+    ConcurrencyResult,
+    ContextScalingResult,
 )
 from llmmanager.widgets.log_view import LogView
 
@@ -38,23 +41,65 @@ if TYPE_CHECKING:
     from llmmanager.app import LLMManagerApp
 
 
+# ── chart constants ─────────────────────────────────────────────────────────
+
+_BAR_WIDTH   = 32
+_BAR_FILL    = "█"
+_BAR_EMPTY   = "░"
+_MODEL_COLORS = ["green", "cyan", "yellow", "magenta", "blue", "red"]
+
+# Symbols for line/table charts — one per model
+_SYMBOLS = ["*", "+", "o", "#", "@", "~"]
+
+
 class BenchmarksScreen(Widget):
     """Screen 5 — run, compare, and review benchmarks."""
 
     DEFAULT_CSS = """
     BenchmarksScreen { width: 1fr; height: 1fr; }
-    #bench-model-row { height: auto; }
-    #bench-model-row Select { width: 1fr; }
-    #btn-refresh-models { width: 5; margin-left: 1; }
+
+    #bench-model-list {
+        height: 8;
+        border: ascii $primary-darken-2;
+        margin-bottom: 1;
+    }
+
+    #bench-model-controls {
+        height: auto;
+        margin-bottom: 1;
+    }
+    #bench-model-controls Button { width: auto; margin-right: 1; }
+
     #bench-live-stats {
         height: auto;
         padding: 1;
         background: $surface-darken-1;
-        border: solid $primary-darken-2;
+        border: ascii $primary-darken-2;
         margin-top: 1;
         color: $text;
     }
+
     #run-controls Button { width: 1fr; }
+
+    #compare-scroll {
+        width: 1fr;
+        height: 1fr;
+    }
+
+    .chart-section {
+        height: auto;
+        margin-bottom: 2;
+    }
+
+    .chart-title {
+        color: $accent;
+        text-style: bold;
+        margin-bottom: 0;
+    }
+
+    .chart-body {
+        padding: 0 1;
+    }
     """
 
     BINDINGS = [
@@ -65,28 +110,33 @@ class BenchmarksScreen(Widget):
     def __init__(self) -> None:
         super().__init__()
         self._current_run: asyncio.Task | None = None
-        self._last_result: BenchmarkResult | None = None
+        self._last_results: list[BenchmarkResult] = []
 
     def compose(self) -> ComposeResult:
         with TabbedContent(id="bench-tabs"):
+            # ── Run ──────────────────────────────────────────────────────
             with TabPane("Run", id="tab-run"):
                 with Vertical(id="run-form"):
                     yield Label("Server:", classes="form-label")
                     yield Select(
-                        options=[("Ollama", "ollama"), ("vLLM", "vllm")],
+                        options=[
+                            ("Ollama",    "ollama"),
+                            ("vLLM",      "vllm"),
+                            ("llama.cpp", "llamacpp"),
+                        ],
                         value="ollama",
                         id="bench-server-select",
                     )
-                    yield Label("Model:", classes="form-label")
-                    with Horizontal(id="bench-model-row"):
-                        yield Select(
-                            options=[("—", "__none__")],
-                            value="__none__",
-                            id="bench-model-select",
-                        )
-                        yield Button("↻", id="btn-refresh-models", variant="default")
+
+                    yield Label("Models  (check one or more):", classes="form-label")
+                    yield SelectionList(id="bench-model-list")
+                    with Horizontal(id="bench-model-controls"):
+                        yield Button("↻ Refresh",      id="btn-refresh-models",  variant="default")
+                        yield Button("Select All",     id="btn-select-all",      variant="default")
+                        yield Button("Deselect All",   id="btn-deselect-all",    variant="default")
+
                     yield Checkbox(
-                        "Auto-swap: unload current model and load selected before benchmark",
+                        "Auto-swap: unload current model and load selected before each run",
                         value=True,
                         id="bench-auto-swap",
                     )
@@ -94,9 +144,9 @@ class BenchmarksScreen(Widget):
                     yield Label("Profile:", classes="form-label")
                     yield Select(
                         options=[
-                            ("Quick (~2 min)",     "quick"),
-                            ("Standard (~10 min)", "standard"),
-                            ("Stress (full ramp)", "stress"),
+                            ("Quick  (~1 min each)",   "quick"),
+                            ("Standard (~5 min each)", "standard"),
+                            ("Stress (full ramp)",      "stress"),
                         ],
                         value="standard",
                         id="bench-profile-select",
@@ -114,52 +164,587 @@ class BenchmarksScreen(Widget):
                         f"Concurrency levels: {', '.join(str(x) for x in BENCHMARK_CONCURRENCY_LEVELS)}",
                         classes="form-hint",
                     )
-                    yield Label("", id="hw-snapshot-label", classes="form-hint")
 
                     with Horizontal(id="run-controls"):
-                        yield Button("Run Benchmark", id="btn-run-bench", variant="primary")
+                        yield Button("Run Benchmark", id="btn-run-bench",    variant="primary")
                         yield Button("Cancel",        id="btn-cancel-bench", variant="error", disabled=True)
 
                     yield Static("", id="bench-live-stats")
                     yield Label("", id="bench-progress-label")
                     yield ProgressBar(total=100, id="bench-progress-bar", show_eta=False)
-                    yield LogView(max_lines=300, id="bench-log")
+                    yield LogView(max_lines=500, id="bench-log")
 
+            # ── Compare ──────────────────────────────────────────────────
+            with TabPane("Compare", id="tab-compare"):
+                yield VerticalScroll(id="compare-scroll")
+
+            # ── Results ──────────────────────────────────────────────────
             with TabPane("Results", id="tab-results"):
                 yield Static(id="results-tab-content")
 
+            # ── History ──────────────────────────────────────────────────
             with TabPane("History", id="tab-history"):
                 yield DataTable(id="history-table", cursor_type="row")
                 yield Button("View Details", id="btn-view-history", variant="default")
 
-            with TabPane("Compare", id="tab-compare"):
-                yield Label("Select two results in History to compare.", id="compare-placeholder")
+    # ── Mount ────────────────────────────────────────────────────────────────
 
     def on_mount(self) -> None:
         table = self.query_one("#history-table", DataTable)
-        table.add_columns("Timestamp", "Server", "Model", "TPS", "TTFT ms", "Max Concurrency", "Tier")
+        table.add_columns(
+            "Timestamp", "Server", "Model", "TPS", "TTFT ms",
+            "Max Concurrency", "Tier",
+        )
         self.run_worker(self._load_history(table))
-        self.run_worker(self._populate_model_select())
+        self.run_worker(self._populate_model_list())
 
-    async def _populate_model_select(self) -> None:
+    # ── Model list ───────────────────────────────────────────────────────────
+
+    async def _populate_model_list(self) -> None:
         app: LLMManagerApp = self.app  # type: ignore[assignment]
         server_type = str(self.query_one("#bench-server-select", Select).value)
         server = app.registry.get(server_type)
-        select = self.query_one("#bench-model-select", Select)
+        ml = self.query_one("#bench-model-list", SelectionList)
+        ml.clear_options()
         if server is None:
             return
         try:
             models = await server.list_loaded_models()
         except Exception:
             models = []
-        if models:
-            select.set_options([(m.display_name, m.model_id) for m in models])
-        else:
-            select.set_options([("No models loaded — check Ollama is running", "__none__")])
+        for m in models:
+            ml.add_option((m.display_name, m.model_id))
 
     def on_select_changed(self, event: Select.Changed) -> None:
         if event.select.id == "bench-server-select":
-            self.run_worker(self._populate_model_select())
+            self.run_worker(self._populate_model_list())
+
+    # ── Button handler ───────────────────────────────────────────────────────
+
+    async def on_button_pressed(self, event: Button.Pressed) -> None:
+        match event.button.id:
+            case "btn-run-bench":
+                await self._start_benchmark()
+            case "btn-cancel-bench":
+                self._cancel_benchmark()
+            case "btn-refresh-models":
+                self.run_worker(self._populate_model_list())
+            case "btn-select-all":
+                ml = self.query_one("#bench-model-list", SelectionList)
+                for i in range(len(ml._options)):  # type: ignore[attr-defined]
+                    ml.select(ml._options[i].value)  # type: ignore[attr-defined]
+            case "btn-deselect-all":
+                self.query_one("#bench-model-list", SelectionList).deselect_all()
+            case "btn-view-history":
+                pass  # TODO: expand selected history row
+
+    # ── Benchmark orchestration ──────────────────────────────────────────────
+
+    async def _start_benchmark(self) -> None:
+        app: LLMManagerApp = self.app  # type: ignore[assignment]
+
+        server_type  = str(self.query_one("#bench-server-select",  Select).value)
+        profile_val  = str(self.query_one("#bench-profile-select", Select).value)
+        auto_swap    = self.query_one("#bench-auto-swap", Checkbox).value
+        ml           = self.query_one("#bench-model-list", SelectionList)
+        selected_ids: list[str] = list(ml.selected)  # type: ignore[arg-type]
+
+        if not selected_ids:
+            self.notify("Select at least one model.", severity="warning")
+            return
+
+        server = app.registry.get(server_type)
+        if server is None:
+            self.notify(f"Server '{server_type}' not found.", severity="error")
+            return
+
+        categories = [cat for cat in BenchmarkCategory if self._cat_enabled(cat)]
+        profile    = BenchmarkProfile(profile_val)
+
+        concurrency = BENCHMARK_CONCURRENCY_LEVELS
+        if profile == BenchmarkProfile.QUICK:
+            categories  = [BenchmarkCategory.THROUGHPUT, BenchmarkCategory.LATENCY]
+            concurrency = [1, 2, 4]
+
+        self.query_one("#btn-run-bench",    Button).disabled = True
+        self.query_one("#btn-cancel-bench", Button).disabled = False
+
+        self._last_results = []
+        self._current_run = asyncio.create_task(
+            self._run_all_models(
+                server, server_type, selected_ids, categories, concurrency,
+                profile, auto_swap,
+            )
+        )
+
+    async def _run_all_models(
+        self,
+        server,
+        server_type: str,
+        model_ids: list[str],
+        categories: list[BenchmarkCategory],
+        concurrency: list[int],
+        profile: BenchmarkProfile,
+        auto_swap: bool,
+    ) -> None:
+        import time as _time
+        log          = self.query_one("#bench-log",          LogView)
+        progress_bar = self.query_one("#bench-progress-bar", ProgressBar)
+        progress_lbl = self.query_one("#bench-progress-label", Label)
+        live_stats   = self.query_one("#bench-live-stats",   Static)
+
+        log.clear_log()
+        progress_bar.progress = 0
+
+        total   = len(model_ids)
+        results = []
+
+        try:
+            for model_idx, model_id in enumerate(model_ids):
+                model_pct_start = model_idx / total * 100
+                model_pct_end   = (model_idx + 1) / total * 100
+
+                log.append_line(
+                    f"\n{'='*60}\n"
+                    f"  Model {model_idx+1}/{total}: {model_id}\n"
+                    f"{'='*60}"
+                )
+
+                config = BenchmarkConfig(
+                    server_type=server_type,
+                    model_id=model_id,
+                    profile=profile,
+                    categories=categories,
+                    concurrency_levels=concurrency,
+                )
+
+                runner = BenchmarkRunner(server, self.app.gpu_provider)  # type: ignore[attr-defined]
+                run_start = _time.monotonic()
+
+                async for msg, result in runner.run(config):
+                    log.append_line(msg)
+                    progress_lbl.update(f"[{model_idx+1}/{total}] {model_id}: {msg}")
+
+                    # Progress within this model's slice
+                    elapsed = _time.monotonic() - run_start
+                    inner_pct = min(elapsed / 60 * 100, 99)
+                    progress_bar.progress = model_pct_start + inner_pct * (model_pct_end - model_pct_start) / 100
+
+                    # Live stats
+                    live_stats.update(
+                        f"[bold]Model:[/] {model_idx+1}/{total}  "
+                        f"[bold]Current:[/] {model_id}  "
+                        f"[bold]Elapsed:[/] {int(_time.monotonic()-run_start)//60:02d}:"
+                        f"{int(_time.monotonic()-run_start)%60:02d}"
+                    )
+
+                    if result is not None:
+                        results.append(result)
+                        self._last_results = results[:]
+                        progress_bar.progress = model_pct_end
+                        log.append_line(
+                            f"  >> {model_id}: "
+                            f"{result.tokens_per_sec:.1f} TPS  "
+                            f"TTFT {result.ttft_ms:.0f}ms  "
+                            f"Tier: {result.hardware_tier or '?'}"
+                        )
+                        # Show single-model result in Results tab
+                        self._show_single_result(result)
+
+        except asyncio.CancelledError:
+            log.append_line("\nBenchmark cancelled.")
+        finally:
+            self.query_one("#btn-run-bench",    Button).disabled = False
+            self.query_one("#btn-cancel-bench", Button).disabled = True
+            progress_bar.progress = 100
+            if results:
+                log.append_line(f"\nAll done. {len(results)}/{total} models completed.")
+                report_path = self._save_report(results)
+                if report_path:
+                    log.append_line(f"[bold]Report saved:[/] {report_path}")
+                self._render_comparison(results)
+                # Switch to Compare tab
+                self.query_one("#bench-tabs", TabbedContent).active = "tab-compare"
+
+    def _save_report(self, results: list[BenchmarkResult]) -> Path | None:
+        """Write a human-readable plain-text report and return its path."""
+        try:
+            reports_dir = BENCHMARK_DIR / "reports"
+            reports_dir.mkdir(parents=True, exist_ok=True)
+
+            now = datetime.now()
+            timestamp_str = now.strftime("%Y%m%d_%H%M%S")
+
+            # Build filename slug from model IDs (sanitised, max 3 models shown)
+            def _slug(model_id: str) -> str:
+                # Strip registry prefix (e.g. "hf.co/org/") and tag suffix
+                name = model_id.split("/")[-1].split(":")[0]
+                return re.sub(r"[^a-zA-Z0-9_.-]", "-", name)[:20]
+
+            model_slugs = [_slug(r.config.model_id) for r in results]
+            if len(model_slugs) > 3:
+                slug_part = "_".join(model_slugs[:3]) + f"_and_{len(model_slugs)-3}_more"
+            else:
+                slug_part = "_".join(model_slugs)
+
+            filename = f"{timestamp_str}_{slug_part}.txt"
+            report_path = reports_dir / filename
+
+            lines: list[str] = []
+            sep = "=" * 72
+            thin = "-" * 72
+
+            lines += [
+                sep,
+                "  LLMManager Benchmark Report",
+                f"  Generated : {now.strftime('%Y-%m-%d %H:%M:%S')}",
+                f"  Server    : {results[0].config.server_type}",
+                f"  Profile   : {results[0].config.profile.value}",
+                f"  Models    : {len(results)}",
+                sep,
+                "",
+            ]
+
+            # ── Per-model summaries ────────────────────────────────────────
+            for i, r in enumerate(results):
+                lines += [
+                    f"  Model {i+1}/{len(results)}: {r.config.model_id}",
+                    thin,
+                    f"    Tokens / sec       : {r.tokens_per_sec:.2f}",
+                    f"    Time to first token: {r.ttft_ms:.0f} ms",
+                    f"    VRAM delta         : {r.vram_delta_mb:.0f} MB",
+                    f"    Hardware tier      : {r.hardware_tier or '—'}",
+                    f"    Max concurrency    : {r.recommended_max_concurrency or '—'}",
+                ]
+                if r.error:
+                    lines.append(f"    ERROR              : {r.error}")
+
+                if r.concurrency_results:
+                    lines.append("    Concurrency scaling (req → TPS):")
+                    for cr in sorted(r.concurrency_results, key=lambda x: x.concurrency):
+                        status = "ABORTED" if cr.aborted else f"{cr.aggregate_tokens_per_sec:.1f} TPS"
+                        lines.append(f"      {cr.concurrency:>3} req  {status}")
+
+                if r.context_results:
+                    lines.append("    Context scaling (ctx → TPS):")
+                    for cr in sorted(r.context_results, key=lambda x: x.context_length):
+                        def _fmt_ctx(c: int) -> str:
+                            return f"{c//1024}K" if c >= 1024 else str(c)
+                        status = f"ERROR ({cr.error})" if cr.error else f"{cr.tokens_per_sec:.1f} TPS"
+                        lines.append(f"      {_fmt_ctx(cr.context_length):>6}  {status}")
+
+                if r.quality_results:
+                    lines.append("    Quality probe latency (avg ms per set):")
+                    from itertools import groupby
+                    for ps, probes in groupby(
+                        sorted(r.quality_results, key=lambda x: x.probe_set),
+                        key=lambda x: x.probe_set,
+                    ):
+                        probe_list = list(probes)
+                        avg = sum(p.latency_ms for p in probe_list) / len(probe_list)
+                        lines.append(f"      {ps:<20}  {avg:.0f} ms")
+
+                lines.append("")
+
+            # ── Side-by-side comparison table ─────────────────────────────
+            if len(results) > 1:
+                lines += [
+                    sep,
+                    "  COMPARISON SUMMARY",
+                    sep,
+                    "",
+                ]
+                col_w = 22
+                header = "Metric".ljust(28) + "".join(r.config.model_id[:col_w].ljust(col_w) for r in results)
+                lines.append("  " + header)
+                lines.append("  " + thin)
+
+                def _row(label: str, values: list[str]) -> str:
+                    return "  " + label.ljust(28) + "".join(v.ljust(col_w) for v in values)
+
+                lines.append(_row("Tokens/sec", [f"{r.tokens_per_sec:.2f}" for r in results]))
+                lines.append(_row("TTFT (ms)", [f"{r.ttft_ms:.0f}" for r in results]))
+                lines.append(_row("VRAM delta (MB)", [f"{r.vram_delta_mb:.0f}" for r in results]))
+                lines.append(_row("Hardware tier", [r.hardware_tier or "—" for r in results]))
+                lines.append(_row("Max concurrency", [str(r.recommended_max_concurrency or "—") for r in results]))
+                lines.append("")
+
+            lines += [sep, "  End of report", sep, ""]
+
+            report_path.write_text("\n".join(lines), encoding="utf-8")
+            return report_path
+
+        except Exception as exc:
+            self.log.error(f"Failed to save benchmark report: {exc}")
+            return None
+
+    def _cancel_benchmark(self) -> None:
+        if self._current_run and not self._current_run.done():
+            self._current_run.cancel()
+
+    def _cat_enabled(self, cat: BenchmarkCategory) -> bool:
+        try:
+            return self.query_one(f"#cat-{cat.value}", Checkbox).value
+        except Exception:
+            return True
+
+    # ── Comparison charts ────────────────────────────────────────────────────
+
+    def _render_comparison(self, results: list[BenchmarkResult]) -> None:
+        scroll = self.query_one("#compare-scroll", VerticalScroll)
+        scroll.remove_children()
+
+        sections: list[Widget] = []
+
+        # Header
+        model_names = [r.config.model_id for r in results]
+        legend = "  ".join(
+            f"[{_MODEL_COLORS[i % len(_MODEL_COLORS)]}]{_SYMBOLS[i % len(_SYMBOLS)]} {name}[/]"
+            for i, name in enumerate(model_names)
+        )
+        sections.append(Static(
+            f"[bold white]BENCHMARK COMPARISON[/]\n{legend}\n",
+            classes="chart-title",
+        ))
+
+        # ── Bar charts ──────────────────────────────────────────────────
+        sections.append(self._bar_chart_widget(
+            "THROUGHPUT  (tokens / sec)",
+            [(r.config.model_id, r.tokens_per_sec) for r in results],
+            "TPS", lower_is_better=False,
+        ))
+
+        sections.append(self._bar_chart_widget(
+            "TIME TO FIRST TOKEN  (ms)",
+            [(r.config.model_id, r.ttft_ms) for r in results],
+            "ms", lower_is_better=True,
+        ))
+
+        sections.append(self._bar_chart_widget(
+            "MAX SAFE CONCURRENCY",
+            [(r.config.model_id, float(r.recommended_max_concurrency or 0)) for r in results],
+            "req", lower_is_better=False,
+        ))
+
+        sections.append(self._bar_chart_widget(
+            "VRAM DELTA  (MB loaded vs unloaded)",
+            [(r.config.model_id, r.vram_delta_mb) for r in results],
+            "MB", lower_is_better=True,
+        ))
+
+        # ── Concurrency scaling chart ───────────────────────────────────
+        has_conc = any(r.concurrency_results for r in results)
+        if has_conc:
+            sections.append(self._concurrency_chart_widget(results))
+
+        # ── Context scaling chart ───────────────────────────────────────
+        has_ctx = any(r.context_results for r in results)
+        if has_ctx:
+            sections.append(self._context_chart_widget(results))
+
+        # ── Quality summary ─────────────────────────────────────────────
+        has_quality = any(r.quality_results for r in results)
+        if has_quality:
+            sections.append(self._quality_table_widget(results))
+
+        self.call_after_refresh(scroll.mount, *sections)
+
+    # ── Chart builders ───────────────────────────────────────────────────────
+
+    def _bar_chart_widget(
+        self,
+        title: str,
+        data: list[tuple[str, float]],
+        unit: str,
+        lower_is_better: bool = False,
+    ) -> Widget:
+        hint = "[dim](lower is better)[/]" if lower_is_better else "[dim](higher is better)[/]"
+        max_val = max((v for _, v in data), default=1.0) or 1.0
+        label_w = min(max((len(n) for n, _ in data), default=10), 24)
+
+        lines = [f"[bold cyan]{title}[/]  {hint}"]
+        lines.append("[dim]" + "-" * (label_w + _BAR_WIDTH + 14) + "[/]")
+
+        for i, (name, val) in enumerate(data):
+            color  = _MODEL_COLORS[i % len(_MODEL_COLORS)]
+            filled = int(_BAR_WIDTH * val / max_val)
+            bar    = _BAR_FILL * filled + _BAR_EMPTY * (_BAR_WIDTH - filled)
+            padded = name[:label_w].ljust(label_w)
+            lines.append(f"[white]{padded}[/] [{color}]{bar}[/]  [bold]{val:.1f}[/] {unit}")
+
+        return Static("\n".join(lines) + "\n", classes="chart-section")
+
+    def _concurrency_chart_widget(self, results: list[BenchmarkResult]) -> Widget:
+        """Table showing TPS at each concurrency level for every model."""
+        # Gather all concurrency levels tested
+        all_levels: list[int] = sorted({
+            cr.concurrency
+            for r in results
+            for cr in r.concurrency_results
+        })
+        if not all_levels:
+            return Static("")
+
+        label_w = min(max((len(r.config.model_id) for r in results), default=10), 24)
+        header_levels = "".join(f"{str(lv):>7}" for lv in all_levels)
+
+        lines = ["[bold cyan]CONCURRENCY SCALING  (aggregate TPS at each parallel-request level)[/]"]
+        lines.append("[dim]" + "-" * (label_w + 3 + len(all_levels) * 7) + "[/]")
+        lines.append(f"[dim]{'Model'.ljust(label_w)}   {header_levels}[/]")
+        lines.append("[dim]" + "-" * (label_w + 3 + len(all_levels) * 7) + "[/]")
+
+        for i, r in enumerate(results):
+            color = _MODEL_COLORS[i % len(_MODEL_COLORS)]
+            sym   = _SYMBOLS[i % len(_SYMBOLS)]
+            conc_map = {cr.concurrency: cr for cr in r.concurrency_results}
+            padded = r.config.model_id[:label_w].ljust(label_w)
+            row = ""
+            for lv in all_levels:
+                if lv in conc_map:
+                    cr = conc_map[lv]
+                    if cr.aborted:
+                        cell = f"[red]{'CUT':>7}[/]"
+                    else:
+                        cell = f"[{color}]{cr.aggregate_tokens_per_sec:>7.1f}[/]"
+                else:
+                    cell = f"[dim]{'---':>7}[/]"
+                row += cell
+            lines.append(f"[{color}]{sym}[/] [{color}]{padded}[/]{row}")
+
+        # Mini ASCII sparkline per model
+        lines.append("")
+        lines.append("[dim]TPS sparkline (concurrency →)[/]")
+        for i, r in enumerate(results):
+            if not r.concurrency_results:
+                continue
+            color  = _MODEL_COLORS[i % len(_MODEL_COLORS)]
+            sym    = _SYMBOLS[i % len(_SYMBOLS)]
+            vals   = [cr.aggregate_tokens_per_sec for cr in r.concurrency_results if not cr.aborted]
+            spark  = self._sparkline(vals, width=40)
+            label  = r.config.model_id[:20].ljust(20)
+            lines.append(f"[{color}]{sym} {label}[/] [{color}]{spark}[/]")
+
+        return Static("\n".join(lines) + "\n", classes="chart-section")
+
+    def _context_chart_widget(self, results: list[BenchmarkResult]) -> Widget:
+        """Table showing TPS at each context length for every model."""
+        all_ctxs: list[int] = sorted({
+            cr.context_length
+            for r in results
+            for cr in r.context_results
+        })
+        if not all_ctxs:
+            return Static("")
+
+        def fmt_ctx(c: int) -> str:
+            return f"{c//1024}K" if c >= 1024 else str(c)
+
+        label_w = min(max((len(r.config.model_id) for r in results), default=10), 24)
+        header  = "".join(f"{fmt_ctx(c):>8}" for c in all_ctxs)
+
+        lines = ["[bold cyan]CONTEXT SCALING  (TPS at each context length)[/]"]
+        lines.append("[dim]" + "-" * (label_w + 3 + len(all_ctxs) * 8) + "[/]")
+        lines.append(f"[dim]{'Model'.ljust(label_w)}   {header}[/]")
+        lines.append("[dim]" + "-" * (label_w + 3 + len(all_ctxs) * 8) + "[/]")
+
+        for i, r in enumerate(results):
+            color   = _MODEL_COLORS[i % len(_MODEL_COLORS)]
+            sym     = _SYMBOLS[i % len(_SYMBOLS)]
+            ctx_map = {cr.context_length: cr for cr in r.context_results}
+            padded  = r.config.model_id[:label_w].ljust(label_w)
+            row     = ""
+            for c in all_ctxs:
+                if c in ctx_map:
+                    cr = ctx_map[c]
+                    if cr.error:
+                        cell = f"[red]{'ERR':>8}[/]"
+                    else:
+                        cell = f"[{color}]{cr.tokens_per_sec:>8.1f}[/]"
+                else:
+                    cell = f"[dim]{'---':>8}[/]"
+                row += cell
+            lines.append(f"[{color}]{sym}[/] [{color}]{padded}[/]{row}")
+
+        # Sparklines
+        lines.append("")
+        lines.append("[dim]TPS sparkline (context length →)[/]")
+        for i, r in enumerate(results):
+            if not r.context_results:
+                continue
+            color  = _MODEL_COLORS[i % len(_MODEL_COLORS)]
+            sym    = _SYMBOLS[i % len(_SYMBOLS)]
+            vals   = [cr.tokens_per_sec for cr in r.context_results if not cr.error]
+            spark  = self._sparkline(vals, width=40)
+            label  = r.config.model_id[:20].ljust(20)
+            lines.append(f"[{color}]{sym} {label}[/] [{color}]{spark}[/]")
+
+        return Static("\n".join(lines) + "\n", classes="chart-section")
+
+    def _quality_table_widget(self, results: list[BenchmarkResult]) -> Widget:
+        """Average latency per quality probe set for each model."""
+        probe_sets: list[str] = sorted({
+            qr.probe_set
+            for r in results
+            for qr in r.quality_results
+        })
+        if not probe_sets:
+            return Static("")
+
+        label_w = min(max((len(r.config.model_id) for r in results), default=10), 24)
+        header  = "".join(f"{ps:>12}" for ps in probe_sets)
+
+        lines = ["[bold cyan]QUALITY PROBE LATENCY  (avg ms per probe set)[/]"]
+        lines.append("[dim]" + "-" * (label_w + 3 + len(probe_sets) * 12) + "[/]")
+        lines.append(f"[dim]{'Model'.ljust(label_w)}   {header}[/]")
+        lines.append("[dim]" + "-" * (label_w + 3 + len(probe_sets) * 12) + "[/]")
+
+        for i, r in enumerate(results):
+            color  = _MODEL_COLORS[i % len(_MODEL_COLORS)]
+            sym    = _SYMBOLS[i % len(_SYMBOLS)]
+            padded = r.config.model_id[:label_w].ljust(label_w)
+            row    = ""
+            for ps in probe_sets:
+                probes = [qr for qr in r.quality_results if qr.probe_set == ps]
+                if probes:
+                    avg = sum(qr.latency_ms for qr in probes) / len(probes)
+                    row += f"[{color}]{avg:>12.0f}[/]"
+                else:
+                    row += f"[dim]{'---':>12}[/]"
+            lines.append(f"[{color}]{sym}[/] [{color}]{padded}[/]{row}")
+
+        return Static("\n".join(lines) + "\n", classes="chart-section")
+
+    @staticmethod
+    def _sparkline(values: list[float], width: int = 30) -> str:
+        """Render a mini terminal sparkline using block characters."""
+        if not values:
+            return ""
+        _BLOCKS = " ▁▂▃▄▅▆▇█"
+        mx = max(values) or 1.0
+        # Resample to `width` points
+        step = len(values) / width
+        resampled = [values[min(int(i * step), len(values) - 1)] for i in range(width)]
+        return "".join(_BLOCKS[int(v / mx * (len(_BLOCKS) - 1))] for v in resampled)
+
+    # ── Single-model results (Results tab) ───────────────────────────────────
+
+    def _show_single_result(self, result: BenchmarkResult) -> None:
+        results_content = self.query_one("#results-tab-content", Static)
+        lines = [
+            f"[bold cyan]{result.config.model_id}[/]",
+            f"Server: {result.config.server_type}",
+            f"Tokens/sec: [bold]{result.tokens_per_sec:.2f}[/]",
+            f"TTFT: [bold]{result.ttft_ms:.0f} ms[/]",
+            f"VRAM delta: {result.vram_delta_mb:.0f} MB",
+            f"Tier: {result.hardware_tier or '—'}",
+        ]
+        if result.recommended_max_concurrency:
+            lines.append(f"Recommended max concurrency: {result.recommended_max_concurrency}")
+        if result.error:
+            lines.append(f"[red]Error: {result.error}[/]")
+        results_content.update("\n".join(lines))
+
+    # ── History ───────────────────────────────────────────────────────────────
 
     async def _load_history(self, table: DataTable) -> None:
         if not BENCHMARK_DIR.exists():
@@ -167,7 +752,7 @@ class BenchmarksScreen(Widget):
         for f in sorted(BENCHMARK_DIR.glob("*.json"), reverse=True)[:50]:
             try:
                 data = json.loads(f.read_text())
-                cfg = data.get("config", {})
+                cfg  = data.get("config", {})
                 table.add_row(
                     data.get("timestamp", "")[:19],
                     cfg.get("server_type", ""),
@@ -181,244 +766,10 @@ class BenchmarksScreen(Widget):
             except Exception:
                 pass
 
-    async def on_button_pressed(self, event: Button.Pressed) -> None:
-        match event.button.id:
-            case "btn-run-bench":
-                await self._start_benchmark()
-            case "btn-cancel-bench":
-                self._cancel_benchmark()
-            case "btn-refresh-models":
-                self.run_worker(self._populate_model_select())
+    # ── Keyboard actions ──────────────────────────────────────────────────────
 
-    async def _start_benchmark(self) -> None:
-        app: LLMManagerApp = self.app  # type: ignore[assignment]
+    def action_run_benchmark(self) -> None:
+        self.run_worker(self._start_benchmark())
 
-        server_type = str(self.query_one("#bench-server-select", Select).value)
-        model_id = str(self.query_one("#bench-model-select", Select).value)
-        profile_val = str(self.query_one("#bench-profile-select", Select).value)
-        auto_swap = self.query_one("#bench-auto-swap", Checkbox).value
-
-        if not model_id or model_id == "__none__":
-            self.notify("Select a model first.", severity="warning")
-            return
-
-        server = app.registry.get(server_type)
-        if server is None:
-            self.notify(f"Server '{server_type}' not found.", severity="error")
-            return
-
-        categories = [cat for cat in BenchmarkCategory if self._cat_enabled(cat)]
-        profile = BenchmarkProfile(profile_val)
-        concurrency = BENCHMARK_CONCURRENCY_LEVELS
-
-        if profile == BenchmarkProfile.QUICK:
-            categories = [BenchmarkCategory.THROUGHPUT, BenchmarkCategory.LATENCY]
-            concurrency = [1, 2, 4]
-
-        config = BenchmarkConfig(
-            server_type=server_type,
-            model_id=model_id,
-            profile=profile,
-            categories=categories,
-            concurrency_levels=concurrency,
-        )
-
-        runner = BenchmarkRunner(server, app.gpu_provider)
-
-        self.query_one("#btn-run-bench", Button).disabled = True
-        self.query_one("#btn-cancel-bench", Button).disabled = False
-
-        self._current_run = asyncio.create_task(
-            self._run_benchmark_task(runner, config, auto_swap=auto_swap)
-        )
-
-    async def _run_benchmark_task(
-        self, runner: BenchmarkRunner, config: BenchmarkConfig, auto_swap: bool = False
-    ) -> None:
-        import time as _time
-        log          = self.query_one("#bench-log", LogView)
-        progress_bar = self.query_one("#bench-progress-bar", ProgressBar)
-        progress_lbl = self.query_one("#bench-progress-label", Label)
-        live_stats   = self.query_one("#bench-live-stats", Static)
-
-        log.clear_log()
-        progress_bar.progress = 0
-        live_stats.update("")
-
-        run_start = _time.monotonic()
-
-        # Phase tracking for progress bar (rough % weights)
-        _PHASE_PCT = {
-            "warmup": 5, "throughput": 30, "memory": 5,
-            "concurrency": 40, "context": 15, "quality": 5,
-        }
-        _phase_done = 0.0
-
-        def _elapsed() -> str:
-            s = int(_time.monotonic() - run_start)
-            m, s = divmod(s, 60)
-            return f"{m:02d}:{s:02d}"
-
-        # Accumulated live stats for the stats panel
-        _stats: dict = {}
-
-        def _render_stats() -> str:
-            parts = [f"[bold]Elapsed:[/] {_elapsed()}"]
-            if "tps" in _stats:
-                parts.append(f"[bold]TPS:[/] {_stats['tps']:.1f}")
-            if "ttft" in _stats:
-                parts.append(f"[bold]TTFT:[/] {_stats['ttft']:.0f} ms")
-            if "phase" in _stats:
-                parts.append(f"[bold]Phase:[/] {_stats['phase']}")
-            if "conc" in _stats:
-                parts.append(f"[bold]Concurrency:[/] {_stats['conc']}")
-            return "   ".join(parts)
-
-        # Auto-swap model
-        if auto_swap:
-            app: LLMManagerApp = self.app  # type: ignore[assignment]
-            server = app.registry.get(config.server_type)
-            if server:
-                try:
-                    loaded = await server.list_loaded_models()
-                    for m in loaded:
-                        if m.model_id != config.model_id:
-                            log.append_line(f"Unloading {m.model_id}…")
-                            await server.unload_model(m.model_id)
-                    if not any(m.model_id == config.model_id for m in loaded):
-                        log.append_line(f"Loading {config.model_id}…")
-                        await server.load_model(config.model_id)
-                        log.append_line("Model ready.")
-                except Exception as exc:
-                    log.append_line(f"[yellow]Warning: model swap failed: {exc}[/]")
-
-        # Start a timer task that refreshes the stats panel every second
-        async def _tick() -> None:
-            while True:
-                live_stats.update(_render_stats())
-                await asyncio.sleep(1.0)
-
-        ticker = asyncio.create_task(_tick())
-
-        try:
-            async for msg, result in runner.run(config):
-                log.append_line(msg)
-                progress_lbl.update(msg)
-
-                # Parse phase transitions for progress bar
-                ml = msg.lower()
-                if "warmup" in ml:
-                    _stats["phase"] = "Warm-up"
-                    progress_bar.progress = _phase_done
-                elif "throughput" in ml:
-                    _stats["phase"] = "Throughput"
-                    progress_bar.progress = _phase_done
-                elif "vram" in ml or "memory" in ml:
-                    _stats["phase"] = "Memory"
-                    _phase_done += _PHASE_PCT["memory"]
-                    progress_bar.progress = _phase_done
-                elif "concurrency test" in ml:
-                    m_conc = msg.split(":")[-1].strip().split()[0] if ":" in msg else ""
-                    _stats["phase"] = "Concurrency"
-                    _stats["conc"] = m_conc
-                    progress_bar.progress = min(_phase_done + _PHASE_PCT["concurrency"] * 0.5, 95)
-                elif "complete" in ml or "avg" in ml:
-                    _phase_done = min(_phase_done + 30, 95)
-                    progress_bar.progress = _phase_done
-
-                # Extract TPS / TTFT from per-run lines
-                if "tps" in ml and "ttft" in ml:
-                    try:
-                        parts = msg.split()
-                        tps_i = next(i for i, p in enumerate(parts) if p == "TPS")
-                        ttft_i = next(i for i, p in enumerate(parts) if p == "ms")
-                        _stats["tps"] = float(parts[tps_i - 1])
-                        _stats["ttft"] = float(parts[ttft_i - 1])
-                    except Exception:
-                        pass
-
-                live_stats.update(_render_stats())
-
-                if result is not None:
-                    self._last_result = result
-                    progress_bar.progress = 100
-                    _stats["tps"] = result.tokens_per_sec
-                    _stats["ttft"] = result.ttft_ms
-                    _stats["phase"] = "Complete"
-                    live_stats.update(_render_stats())
-                    self._show_results(result)
-
-        except asyncio.CancelledError:
-            log.append_line("Benchmark cancelled.")
-        finally:
-            ticker.cancel()
-            self.query_one("#btn-run-bench", Button).disabled = False
-            self.query_one("#btn-cancel-bench", Button).disabled = True
-
-    def _cancel_benchmark(self) -> None:
-        if self._current_run and not self._current_run.done():
-            self._current_run.cancel()
-
-    def _cat_enabled(self, cat: BenchmarkCategory) -> bool:
-        try:
-            cb = self.query_one(f"#cat-{cat.value}", Checkbox)
-            return cb.value
-        except Exception:
-            return True
-
-    def _show_results(self, result: BenchmarkResult) -> None:
-        results_content = self.query_one("#results-tab-content", Static)
-        results_content.remove_children()
-
-        # Build children list and pass to Vertical constructor — avoids mounting
-        # to an unattached widget (not supported in Textual 8.2.3+).
-        children: list[Widget] = [
-            Label(f"Model: {result.config.model_id}", classes="section-heading"),
-            Label(f"Server: {result.config.server_type}"),
-            Label(f"Tokens/sec: {result.tokens_per_sec:.2f}"),
-            Label(f"TTFT: {result.ttft_ms:.0f} ms"),
-            Label(f"VRAM delta: {result.vram_delta_mb:.0f} MB"),
-            Label(f"Hardware tier: {result.hardware_tier or '—'}"),
-        ]
-
-        if result.recommended_max_concurrency:
-            children.append(Label(
-                f"Recommended max concurrency: {result.recommended_max_concurrency}",
-                classes="section-heading",
-            ))
-
-        if result.concurrency_results:
-            children.append(Label("Concurrency Results:", classes="section-heading"))
-            table = DataTable(id="conc-results-table")
-            table.add_columns(
-                "Concurrency", "Req/s", "TPS", "Latency p50", "Latency p99",
-                "TTFT p50", "Errors", "Status"
-            )
-            for cr in result.concurrency_results:
-                table.add_row(
-                    str(cr.concurrency),
-                    f"{cr.successful}/{cr.total_requests}",
-                    f"{cr.aggregate_tokens_per_sec:.1f}",
-                    f"{cr.per_request_latency.p50_ms:.0f} ms",
-                    f"{cr.per_request_latency.p99_ms:.0f} ms",
-                    f"{cr.ttft_ms.p50_ms:.0f} ms",
-                    str(cr.failed),
-                    "[red]ABORTED[/]" if cr.aborted else "[green]OK[/]",
-                )
-            children.append(table)
-
-        if result.context_results:
-            children.append(Label("Context Scaling:", classes="section-heading"))
-            ctx_table = DataTable(id="ctx-results-table")
-            ctx_table.add_columns("Context Len", "TPS", "TTFT ms", "VRAM MB", "Error")
-            for cr in result.context_results:
-                ctx_table.add_row(
-                    f"{cr.context_length:,}",
-                    f"{cr.tokens_per_sec:.1f}",
-                    f"{cr.ttft_ms:.0f}",
-                    f"{cr.vram_mb:.0f}",
-                    cr.error or "",
-                )
-            children.append(ctx_table)
-
-        results_content.mount(Vertical(*children))
+    def action_cancel_benchmark(self) -> None:
+        self._cancel_benchmark()

@@ -20,6 +20,7 @@ from textual.widgets import (
 
 from llmmanager.models.llm_model import DownloadProgress, ModelSource
 from llmmanager.widgets.confirm_dialog import ConfirmDialog
+from llmmanager.widgets.version_picker import VersionPickerDialog
 
 if TYPE_CHECKING:
     from llmmanager.app import LLMManagerApp
@@ -110,9 +111,10 @@ class ModelManagementScreen(Widget):
                 yield Input(placeholder="Filter models...", id="installed-search")
                 yield DataTable(id="installed-table", cursor_type="row")
                 with Horizontal(classes="model-action-bar"):
-                    yield Button("Load",   id="btn-load",   variant="success")
-                    yield Button("Unload", id="btn-unload", variant="warning")
-                    yield Button("Delete", id="btn-delete", variant="error")
+                    yield Button("Load",    id="btn-load",            variant="success")
+                    yield Button("Unload",  id="btn-unload",          variant="warning")
+                    yield Button("Delete",  id="btn-delete",          variant="error")
+                    yield Button("Refresh", id="btn-installed-refresh", variant="default")
 
             # ---- Ollama Library -------------------------------------------
             with TabPane("Ollama Library", id="tab-ollama-lib"):
@@ -394,8 +396,10 @@ class ModelManagementScreen(Widget):
                 self.run_worker(self._do_unload_selected())
             case "btn-delete":
                 await self._do_delete_selected()
+            case "btn-installed-refresh":
+                self.run_worker(self._load_installed())
             case "btn-ollama-download":
-                self._enqueue_ollama_download()
+                await self._enqueue_ollama_download()
             case "btn-ollama-refresh":
                 self._ollama_lib_loaded = False
                 self.run_worker(self._load_ollama_library(
@@ -471,19 +475,37 @@ class ModelManagementScreen(Widget):
             except Exception as exc:
                 self.notify(str(exc), severity="error")
 
-    def _enqueue_ollama_download(self) -> None:
+    async def _enqueue_ollama_download(self) -> None:
         app: LLMManagerApp = self.app  # type: ignore[assignment]
         table = self.query_one("#ollama-table", DataTable)
         if table.cursor_row is None:
             self.notify("Select a model first.", severity="warning")
             return
-        model_name = str(table.get_row_at(table.cursor_row)[0])
+        row = table.get_row_at(table.cursor_row)
+        model_name = str(row[0])
+        # Parse tags from column 1 (stored as "1b, 3b, 7b, ...")
+        tags_raw = str(row[1]) if len(row) > 1 else ""
+        tags = [t.strip() for t in tags_raw.split(",") if t.strip() and t.strip() != "—"]
+
         ollama = app.registry.get("ollama")
         if ollama is None:
-            self.notify("Ollama is not running.", severity="error")
+            self.notify("Ollama server is not configured.", severity="error")
             return
-        app.download_manager.enqueue(ollama, model_name)
-        self.notify(f"Queued: {model_name}")
+
+        if len(tags) > 1:
+            chosen_tag = await self.app.push_screen_wait(
+                VersionPickerDialog(model_name, tags)
+            )
+            if chosen_tag is None:
+                return  # cancelled
+            full_name = f"{model_name}:{chosen_tag}"
+        elif len(tags) == 1:
+            full_name = f"{model_name}:{tags[0]}"
+        else:
+            full_name = model_name  # fallback — Ollama will use :latest
+
+        app.download_manager.enqueue(ollama, full_name)
+        self.notify(f"Queued: {full_name}")
 
     def _enqueue_hf_download(self) -> None:
         app: LLMManagerApp = self.app  # type: ignore[assignment]
@@ -529,7 +551,7 @@ class ModelManagementScreen(Widget):
     def action_download_model(self) -> None:
         tabs = self.query_one("#model-tabs", TabbedContent)
         if tabs.active == "tab-ollama-lib":
-            self._enqueue_ollama_download()
+            self.run_worker(self._enqueue_ollama_download())
         elif tabs.active == "tab-hf":
             self._enqueue_hf_download()
 

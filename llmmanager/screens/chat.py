@@ -29,6 +29,7 @@ class ChatScreen(Widget):
 
     #chat-toolbar Label { margin: 1 1 0 0; }
     #chat-toolbar Select { width: 22; margin-right: 1; }
+    #btn-chat-refresh-models { width: 3; margin-right: 1; }
     #btn-chat-clear { width: 10; margin-left: 1; }
 
     #chat-history {
@@ -103,7 +104,7 @@ class ChatScreen(Widget):
         with Horizontal(id="chat-toolbar"):
             yield Label("Server:")
             yield Select(
-                options=[("Ollama", "ollama"), ("vLLM", "vllm")],
+                options=[("Ollama", "ollama"), ("vLLM", "vllm"), ("LM Studio", "lmstudio"), ("llama.cpp", "llamacpp")],
                 value="ollama",
                 id="chat-server-select",
             )
@@ -113,6 +114,7 @@ class ChatScreen(Widget):
                 value="__none__",
                 id="chat-model-select",
             )
+            yield Button("↻", id="btn-chat-refresh-models", variant="default", tooltip="Refresh model list")
             yield Button("Clear", id="btn-chat-clear", variant="default")
 
         yield VerticalScroll(id="chat-history")
@@ -127,6 +129,7 @@ class ChatScreen(Widget):
 
     def on_mount(self) -> None:
         self.run_worker(self._populate_model_select())
+        self.query_one("#chat-input", Input).focus()
 
     # ------------------------------------------------------------------
     # Model select population
@@ -157,16 +160,18 @@ class ChatScreen(Widget):
     # Message sending
     # ------------------------------------------------------------------
 
-    async def on_button_pressed(self, event: Button.Pressed) -> None:
+    def on_button_pressed(self, event: Button.Pressed) -> None:
         match event.button.id:
             case "btn-chat-send":
-                await self._send()
+                self.run_worker(self._send())
+            case "btn-chat-refresh-models":
+                self.run_worker(self._populate_model_select())
             case "btn-chat-clear":
                 self.action_clear_chat()
 
-    async def on_input_submitted(self, event: Input.Submitted) -> None:
+    def on_input_submitted(self, event: Input.Submitted) -> None:
         if event.input.id == "chat-input":
-            await self._send()
+            self.run_worker(self._send())
 
     async def _send(self) -> None:
         if self._streaming:
@@ -214,8 +219,13 @@ class ChatScreen(Widget):
 
         try:
             full = ""
-            prompt = self._build_prompt()
-            async for token in server.quick_infer(model_id, prompt):
+            messages = self._build_messages()
+            chat_fn = getattr(server, "chat_infer", None)
+            if chat_fn is not None:
+                stream = chat_fn(model_id, messages)
+            else:
+                stream = server.quick_infer(model_id, self._build_prompt())
+            async for token in stream:
                 full += token
                 asst_box.update(f"[bold green]{model_id}[/]\n{full}")
                 history.scroll_end(animate=False)
@@ -227,17 +237,33 @@ class ChatScreen(Widget):
             asst_box.update(f"[bold green]{model_id}[/]\n[dim](cancelled)[/]")
             status.update("Cancelled")
         except Exception as exc:
-            err = Static(f"[red]Error: {exc}[/]", classes="msg-error")
+            msg = str(exc)
+            # Roll back the user message so failed turns don't corrupt context
+            if self._conversation and self._conversation[-1]["role"] == "user":
+                self._conversation.pop()
+            if "unable to load model" in msg:
+                hint = " — model may be corrupted, re-download from Model Management."
+                err = Static(f"[red]{msg}{hint}[/]", classes="msg-error")
+            else:
+                err = Static(f"[red]Error: {msg}[/]", classes="msg-error")
             await history.mount(err)
-            status.update(f"Error: {exc}")
+            status.update(f"Error: {msg}")
         finally:
             self._streaming = False
             inp.disabled = False
             self.query_one("#btn-chat-send", Button).disabled = False
             inp.focus()
 
+    def _build_messages(self) -> list[dict[str, str]]:
+        """Return full conversation as a messages list for /api/chat."""
+        msgs: list[dict[str, str]] = [
+            {"role": "system", "content": self._system_prompt}
+        ]
+        msgs.extend(self._conversation)
+        return msgs
+
     def _build_prompt(self) -> str:
-        """Format full conversation history as a single prompt string."""
+        """Fallback: flat prompt string for servers without chat_infer."""
         lines = [f"System: {self._system_prompt}", ""]
         for msg in self._conversation:
             role = "User" if msg["role"] == "user" else "Assistant"
