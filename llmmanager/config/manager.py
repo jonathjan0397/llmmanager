@@ -88,7 +88,7 @@ class ConfigManager:
 
         CONFIG_DIR.mkdir(parents=True, exist_ok=True)
 
-        raw = self._config.model_dump(mode="json", exclude_none=False)
+        raw = self._config.model_dump(mode="json", exclude_none=True)
 
         try:
             tmp = self._path.with_suffix(".toml.tmp")
