@@ -108,8 +108,8 @@ class LLMManagerApp(App):
         # Start notification processing loop
         self._notif_task = asyncio.create_task(self._process_notifications())
 
-        # Show setup wizard on first run if nothing installed
-        await self._check_first_run()
+        # Check first run in background — don't block the initial render
+        self.run_worker(self._check_first_run(), exclusive=False)
 
     async def on_unmount(self) -> None:
         await self.poller.stop()
