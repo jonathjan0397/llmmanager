@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 import psutil
 from textual.app import ComposeResult
 from textual.containers import Horizontal, ScrollableContainer, Vertical
-from textual.screen import Screen
+from textual.widget import Widget
 from textual.widgets import Label, ProgressBar, Static
 
 from llmmanager.widgets.gpu_meter import GPUMeter
@@ -18,8 +18,10 @@ if TYPE_CHECKING:
     from llmmanager.app import LLMManagerApp
 
 
-class DashboardScreen(Screen):
+class DashboardScreen(Widget):
     """Screen 1 — live metrics grid."""
+
+    DEFAULT_CSS = "DashboardScreen { width: 1fr; height: 1fr; }"
 
     BINDINGS = [
         ("r", "restart_selected", "Restart server"),

@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical, VerticalScroll
-from textual.screen import Screen
+from textual.widget import Widget
 from textual.widgets import Button, Label, ListItem, ListView, Static
 
 from llmmanager.widgets.confirm_dialog import ConfirmDialog
@@ -19,8 +19,10 @@ if TYPE_CHECKING:
 _SERVER_TYPES = ["ollama", "vllm", "lmstudio"]
 
 
-class ServerManagementScreen(Screen):
+class ServerManagementScreen(Widget):
     """Screen 2 — per-server install, config, and lifecycle controls."""
+
+    DEFAULT_CSS = "ServerManagementScreen { width: 1fr; height: 1fr; }"
 
     BINDINGS = [
         ("s", "start_server",   "Start"),

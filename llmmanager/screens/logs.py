@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 from textual.app import ComposeResult
 from textual.containers import Horizontal
-from textual.screen import Screen
+from textual.widget import Widget
 from textual.widgets import Button, Input, Label, Select
 
 from llmmanager.services.log_tailer import LogLine
@@ -17,8 +17,10 @@ if TYPE_CHECKING:
     from llmmanager.app import LLMManagerApp
 
 
-class LogsScreen(Screen):
+class LogsScreen(Widget):
     """Screen 4 — live log viewer with per-server selection and filtering."""
+
+    DEFAULT_CSS = "LogsScreen { width: 1fr; height: 1fr; }"
 
     BINDINGS = [
         ("ctrl+l", "clear_logs",  "Clear"),

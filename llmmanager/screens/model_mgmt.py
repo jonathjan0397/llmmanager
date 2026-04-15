@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical, VerticalScroll
-from textual.screen import Screen
+from textual.widget import Widget
 from textual.widgets import (
     Button,
     DataTable,
@@ -25,8 +25,10 @@ if TYPE_CHECKING:
     from llmmanager.app import LLMManagerApp
 
 
-class ModelManagementScreen(Screen):
+class ModelManagementScreen(Widget):
     """Screen 3 — model library, downloads, and management."""
+
+    DEFAULT_CSS = "ModelManagementScreen { width: 1fr; height: 1fr; }"
 
     BINDINGS = [
         ("d",      "download_model", "Download"),

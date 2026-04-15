@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical, VerticalScroll
-from textual.screen import Screen
+from textual.widget import Widget
 from textual.widgets import Button, Input, Label, Select, TextArea
 
 from llmmanager.widgets.endpoint_badge import EndpointBadge
@@ -17,8 +17,10 @@ if TYPE_CHECKING:
     from llmmanager.app import LLMManagerApp
 
 
-class APIPanelScreen(Screen):
+class APIPanelScreen(Widget):
     """Screen 7 — active endpoints and quick inference test."""
+
+    DEFAULT_CSS = "APIPanelScreen { width: 1fr; height: 1fr; }"
 
     BINDINGS = [("r", "refresh_endpoints", "Refresh")]
 

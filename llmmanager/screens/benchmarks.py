@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical, VerticalScroll
-from textual.screen import Screen
+from textual.widget import Widget
 from textual.widgets import (
     Button,
     Checkbox,
@@ -38,8 +38,10 @@ if TYPE_CHECKING:
     from llmmanager.app import LLMManagerApp
 
 
-class BenchmarksScreen(Screen):
+class BenchmarksScreen(Widget):
     """Screen 5 — run, compare, and review benchmarks."""
+
+    DEFAULT_CSS = "BenchmarksScreen { width: 1fr; height: 1fr; }"
 
     BINDINGS = [
         ("r", "run_benchmark",    "Run"),

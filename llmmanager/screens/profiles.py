@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical
-from textual.screen import Screen
+from textual.widget import Widget
 from textual.widgets import Button, DataTable, Input, Label
 
 from llmmanager.config.schema import ProfileConfig
@@ -17,8 +17,10 @@ if TYPE_CHECKING:
     from llmmanager.app import LLMManagerApp
 
 
-class ProfilesScreen(Screen):
+class ProfilesScreen(Widget):
     """Screen 6 — save, load, and switch named server configurations."""
+
+    DEFAULT_CSS = "ProfilesScreen { width: 1fr; height: 1fr; }"
 
     BINDINGS = [
         ("a", "add_profile",    "New Profile"),
@@ -79,7 +81,7 @@ class ProfilesScreen(Screen):
         if not name:
             self.notify("Enter a profile name.", severity="warning")
             return
-        now = datetime.utcnow().isoformat()
+        now = datetime.now(timezone.utc).isoformat()
         profile = ProfileConfig(
             name=name,
             description=desc,
