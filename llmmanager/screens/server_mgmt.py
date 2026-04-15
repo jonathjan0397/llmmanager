@@ -211,7 +211,7 @@ class ServerManagementScreen(Widget):
     # Button handler
     # ------------------------------------------------------------------
 
-    async def on_button_pressed(self, event: Button.Pressed) -> None:
+    def on_button_pressed(self, event: Button.Pressed) -> None:
         app: LLMManagerApp = self.app  # type: ignore[assignment]
         server = app.registry.get(self._selected)
         if server is None:
@@ -227,25 +227,9 @@ class ServerManagementScreen(Widget):
                 self._save_model_selection(server)
                 self.run_worker(self._start_with_model(server, restart=True))
             case "btn-install":
-                sudo_pw = await self._maybe_sudo(server)
-                if sudo_pw is False:
-                    return  # user cancelled password prompt
-                self.run_worker(self._stream_install(server, "latest", sudo_password=sudo_pw or ""))
+                self.run_worker(self._do_install(server))
             case "btn-uninstall":
-                confirmed = await self.app.push_screen_wait(
-                    ConfirmDialog(
-                        f"Uninstall {server.display_name}?",
-                        "This will remove the server binary/venv.",
-                    )
-                )
-                if not confirmed:
-                    return
-                sudo_pw = await self._maybe_sudo(server)
-                if sudo_pw is False:
-                    return  # user cancelled password prompt
-                self.run_worker(self._stream_install_output(
-                    server.uninstall(sudo_password=sudo_pw or "")
-                ))
+                self.run_worker(self._do_uninstall(server))
             case "btn-apply":
                 self._save_flags(server)
                 self._save_model_selection(server)
@@ -325,6 +309,35 @@ class ServerManagementScreen(Widget):
             await fn()
         except Exception as exc:
             self.notify(str(exc), severity="error")
+
+    async def _do_install(self, server: "AbstractServer") -> None:
+        sudo_pw = await self._maybe_sudo(server)
+        if sudo_pw is False:
+            return
+        await self._stream_install(server, "latest", sudo_password=sudo_pw or "")
+
+    async def _do_uninstall(self, server: "AbstractServer") -> None:
+        confirmed = await self.app.push_screen_wait(
+            ConfirmDialog(
+                f"Uninstall {server.display_name}?",
+                "This will remove the server binary/venv.",
+            )
+        )
+        if not confirmed:
+            return
+        sudo_pw = await self._maybe_sudo(server)
+        if sudo_pw is False:
+            return
+        scroll = self.query_one("#flag-form-scroll")
+        await scroll.remove_children()
+        LogView = __import__("llmmanager.widgets.log_view", fromlist=["LogView"]).LogView
+        log = LogView(id="install-log")
+        await scroll.mount(log)
+        try:
+            async for line in server.uninstall(sudo_password=sudo_pw or ""):
+                log.append_line(line)
+        except Exception as exc:
+            log.append_line(f"ERROR: {exc}")
 
     async def _maybe_sudo(self, server: "AbstractServer") -> str | bool:
         """
