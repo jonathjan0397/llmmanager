@@ -124,6 +124,9 @@ class LLMManagerApp(App):
         # Check first run in background — don't block the initial render
         self.run_worker(self._check_first_run(), exclusive=False)
 
+        # Force initial render in case the mount cycle didn't trigger one
+        self.refresh(layout=True)
+
     async def on_unmount(self) -> None:
         await self.poller.stop()
         await self.download_manager.stop()
