@@ -93,39 +93,41 @@ class LLMManagerApp(App):
             raise
 
     async def _mount_impl(self) -> None:
-        # Load config
+        import time as _t
+        _log_path = "/tmp/mount_log.txt"
+
+        def _log(msg: str) -> None:
+            with open(_log_path, "a") as _f:
+                _f.write(f"{_t.time():.3f}: {msg}\n")
+
+        _log("step 1 start")
         cfg = self.config_manager.load()
-
-        # Initialize server backends
+        _log("step 2 config loaded")
         self.registry.initialize()
-
-        # Initialize GPU provider
+        _log("step 3 registry init")
         await self.gpu_provider.initialize()
-
-        # Wire up services
+        _log("step 4 gpu init")
         self.poller = PollerService(
             gpu_provider=self.gpu_provider,
             server_registry=self.registry,
             interval_ms=cfg.poll_interval_ms,
         )
+        _log("step 5 poller created")
         self.notif_manager = NotificationManager(cfg)
-
-        # Start background services
+        _log("step 6 notif manager created")
         await self.poller.start()
+        _log("step 7 poller started")
         await self.download_manager.start()
-
-        # Start log tailing for all enabled servers
+        _log("step 8 download manager started")
         for server in self.registry.all_enabled():
             self.log_tailer.start_server(server)
-
-        # Start notification processing loop
+        _log("step 9 log tailers started")
         self._notif_task = asyncio.create_task(self._process_notifications())
-
-        # Check first run in background — don't block the initial render
+        _log("step 10 notif task created")
         self.run_worker(self._check_first_run(), exclusive=False)
-
-        # Force initial render in case the mount cycle didn't trigger one
+        _log("step 11 first-run worker started")
         self.refresh(layout=True)
+        _log("step 12 COMPLETE")
 
     async def on_unmount(self) -> None:
         await self.poller.stop()
