@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 import psutil
 from textual.app import ComposeResult
-from textual.containers import Horizontal, ScrollableContainer, Vertical
+from textual.containers import Horizontal, HorizontalScroll, ScrollableContainer, Vertical
 from textual.widget import Widget
 from textual.widgets import Button, Label, ProgressBar, Select, Static
 
@@ -22,6 +22,11 @@ class DashboardScreen(Widget):
 
     DEFAULT_CSS = """
     DashboardScreen { width: 1fr; height: 1fr; }
+
+    #server-cards-row {
+        height: auto;
+        min-height: 12;
+    }
 
     #quick-load-box {
         height: auto;
@@ -51,7 +56,7 @@ class DashboardScreen(Widget):
 
     def compose(self) -> ComposeResult:
         yield Label("Server Status", id="dash-servers-heading", classes="section-heading")
-        with Horizontal(id="server-cards-row"):
+        with HorizontalScroll(id="server-cards-row"):
             yield ServerCard("ollama")
             yield ServerCard("vllm")
             yield ServerCard("lmstudio")
