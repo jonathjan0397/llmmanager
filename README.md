@@ -6,7 +6,7 @@ Install, configure, run, and benchmark **Ollama**, **vLLM**, **LM Studio**, and 
 
 ```
 +-----------------------------------------------------------------------------+
-|  LLM Manager v0.2.0                          [N]Notifs  [P]Profile  [?]Help |
+|  LLM Manager v0.1.1                          [N]Notifs  [P]Profile  [?]Help |
 |-----------------------------------------------------------------------------|
 |  [1]Dashboard  [2]Servers  [3]Models  [4]Logs  [5]Bench  [6]Profiles  [7]API|
 +-----------------------------------------------------------------------------+
@@ -182,13 +182,77 @@ If you want to manage the build yourself, install `llama-cpp-python[server]` man
 
 | Server | Install | Configure | Start/Stop | Models |
 |--------|---------|-----------|------------|--------|
-| **Ollama** | Auto | Full flags | Yes | Full (pull / unload / delete) |
+| **Ollama** | Auto | Full flags | Yes | Full (pull / load / unload / delete) |
 | **vLLM** | Auto (venv) | Full flags | Yes | Full |
 | **llama.cpp** | Auto (venv, GPU-aware) | Full flags | Yes | Full (GGUF path required) |
-| **LM Studio** | Manual (GUI app) | GUI only | GUI only | Read (list loaded) |
+| **LM Studio** | Manual (GUI app) | Connection only | GUI only | List all / load / unload |
 
-LM Studio must be started manually; LLMManager detects and connects to its local server
-automatically once it is running.
+---
+
+## Server notes
+
+### Ollama
+
+- **Install / Uninstall** uses `sudo` on Linux. LLMManager will prompt for your sudo password
+  in-app — it is never stored.
+- **Pre-loading**: after Start or Restart, LLMManager sends a short warm-up prompt to the
+  default model so the first real request is fast.
+- **keep-alive**: set `keep-alive = "0"` in flags to unload models from VRAM immediately after
+  each request; useful when you share the GPU with other workloads.
+
+### vLLM
+
+- **Runs in an isolated venv** at `~/.local/share/llmmanager/venvs/vllm/` — it will not
+  conflict with other Python environments on your system.
+- **One model at a time**: vLLM loads a single model at startup via the `--model` flag. Set
+  your model in the Model field before clicking Start.
+- **Model visibility**: LLMManager shows models from three sources: the running server,
+  the `--model` flag in your saved config, and your local HuggingFace cache
+  (`~/.cache/huggingface/hub/`). If a model appears in the list but is greyed out it is
+  cached but not currently loaded.
+- **CUDA required** for GPU inference. CPU-only inference is possible but very slow.
+- **HuggingFace token**: if a model requires authentication, set `HF_TOKEN` in your
+  environment before launching LLMManager, or pass it via the `--tokenizer` / env flags.
+
+### llama.cpp
+
+- **GGUF path required**: set the full path to a `.gguf` file in the Model field before
+  clicking Start. The server will not start without it.
+- **GPU layers (`--n-gpu-layers`)**: set to `-1` to offload all layers, or a specific number
+  to keep part of the model in VRAM and the rest in RAM (useful for models larger than your VRAM).
+- **Context size (`--ctx-size`)**: defaults to 512; increase to 4096–32768 for longer
+  conversations. Larger contexts use more VRAM.
+- **Continuous batching**: enable `--cont-batching` for better throughput when running multiple
+  concurrent requests.
+- **Build flags** are auto-detected at install time (CUDA / ROCm / Metal / CPU). If you
+  upgrade your GPU drivers after installing, re-install llama.cpp from the Server Management
+  screen to rebuild with the correct flags.
+
+### LM Studio
+
+LM Studio is a GUI desktop application. LLMManager **cannot install, start, or stop it** —
+these controls are disabled when LM Studio is selected.
+
+**Setup:**
+1. Download and install LM Studio from [lmstudio.ai](https://lmstudio.ai)
+2. Open LM Studio → go to **Local Server** (the `<->` icon in the left sidebar)
+3. Click **Start Server**
+4. *(Optional)* Set an API key under Local Server settings if you want to secure access
+
+**In LLMManager:**
+- Go to **Servers → LM Studio**
+- Set the **port** if you changed it from the default (1234)
+- Set the **API key** if you enabled one in LM Studio
+- Click **Save & Poll** — LLMManager will verify the connection and show what models are loaded
+- LM Studio will then appear as **Running** on the Dashboard and be available in Chat,
+  Benchmarks, and the API panel
+
+**Model loading**: use the model picker on the Server Management screen or the Quick Load
+widget on the Dashboard. LLMManager sends load/unload requests to LM Studio's local API —
+you do not need to use the LM Studio GUI to switch models.
+
+**Polling**: LLMManager polls LM Studio every 2 seconds (same as other servers). If LM Studio
+is closed, the Dashboard card will switch to Stopped automatically.
 
 ---
 
@@ -245,8 +309,8 @@ make help       # show all targets
 ## Releasing
 
 ```sh
-git tag v0.2.0
-git push origin v0.2.0
+git tag v0.1.1
+git push origin v0.1.1
 ```
 
 GitHub Actions will build and publish to PyPI automatically (requires
