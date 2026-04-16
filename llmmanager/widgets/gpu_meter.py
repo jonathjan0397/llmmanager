@@ -77,7 +77,8 @@ class GPUMeter(Widget):
             yield Label("%", id=f"gpu-{i}-fan-pct-label")
             yield Button("Set",  id=f"gpu-{i}-btn-fan-set",  variant="primary")
             yield Button("Auto", id=f"gpu-{i}-btn-fan-auto", variant="default")
-        self.query_one(f"#gpu-{i}-fan-row").display = False
+    def on_mount(self) -> None:
+        self.query_one(f"#gpu-{self._gpu_index}-fan-row").display = False
 
     def watch_gpu_info(self, info: GPUInfo | None) -> None:
         if info is None:
