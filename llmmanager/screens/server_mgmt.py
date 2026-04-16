@@ -182,6 +182,15 @@ class ServerManagementScreen(Widget):
                 id="flag-form-placeholder",
             ))
 
+        # Adjust lifecycle buttons for GUI-only servers (e.g. LM Studio)
+        is_gui_only = server_type == "lmstudio"
+        self.query_one("#btn-apply",   Button).label = "Save & Poll" if is_gui_only else "Apply & Restart"
+        self.query_one("#btn-start",   Button).disabled = is_gui_only
+        self.query_one("#btn-stop",    Button).disabled = is_gui_only
+        self.query_one("#btn-restart", Button).disabled = is_gui_only
+        self.query_one("#btn-install", Button).disabled = is_gui_only
+        self.query_one("#btn-uninstall", Button).disabled = is_gui_only
+
     async def _populate_model_dropdown(self, server: "AbstractServer") -> None:
         """Async: fetch installed models and fill the Select dropdown."""
         try:
@@ -233,7 +242,10 @@ class ServerManagementScreen(Widget):
             case "btn-apply":
                 self._save_flags(server)
                 self._save_model_selection(server)
-                self.run_worker(self._start_with_model(server, restart=True))
+                if server.name == "lmstudio":
+                    self.run_worker(self._poll_lmstudio(server))
+                else:
+                    self.run_worker(self._start_with_model(server, restart=True))
             case "btn-reset":
                 from llmmanager.config.defaults import SERVER_DEFAULTS
                 defaults = SERVER_DEFAULTS.get(self._selected)
@@ -302,6 +314,33 @@ class ServerManagementScreen(Widget):
     # ------------------------------------------------------------------
     # Lifecycle / install helpers
     # ------------------------------------------------------------------
+
+    async def _poll_lmstudio(self, server: "AbstractServer") -> None:
+        """Save settings and verify LM Studio is reachable at the configured host:port."""
+        host = server.config.host
+        port = server.config.port
+        self.notify(f"Settings saved. Checking LM Studio at {host}:{port}…")
+        try:
+            status = await server.get_status()
+            from llmmanager.models.server import ServerState
+            if status.state == ServerState.RUNNING:
+                loaded = ", ".join(status.loaded_models) if status.loaded_models else "none loaded"
+                self.notify(
+                    f"LM Studio is running at {host}:{port}  •  models: {loaded}",
+                    severity="information",
+                )
+                # Trigger a dashboard refresh so the server card updates immediately
+                app: LLMManagerApp = self.app  # type: ignore[assignment]
+                if app.poller:
+                    self.run_worker(app.poller.force_poll())
+            else:
+                self.notify(
+                    f"LM Studio not detected at {host}:{port}. "
+                    "Open LM Studio and enable Local Server, then click Save & Poll again.",
+                    severity="warning",
+                )
+        except Exception as exc:
+            self.notify(f"Poll failed: {exc}", severity="error")
 
     async def _lifecycle(self, fn, msg: str) -> None:
         self.notify(msg)

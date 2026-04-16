@@ -99,10 +99,16 @@ class ServerCard(Widget):
         self.query_one(f"#{t}-card-uptime", Label).update(uptime)
 
         # Enable/disable buttons based on state
-        running = state == ServerState.RUNNING
-        self.query_one(f"#{t}-btn-start",   Button).disabled = running
-        self.query_one(f"#{t}-btn-stop",    Button).disabled = not running
-        self.query_one(f"#{t}-btn-restart", Button).disabled = not running
+        # GUI-only servers (LM Studio) cannot be managed — hide their lifecycle buttons
+        if self._server_type == "lmstudio":
+            self.query_one(f"#{t}-btn-start",   Button).display = False
+            self.query_one(f"#{t}-btn-stop",    Button).display = False
+            self.query_one(f"#{t}-btn-restart", Button).display = False
+        else:
+            running = state == ServerState.RUNNING
+            self.query_one(f"#{t}-btn-start",   Button).disabled = running
+            self.query_one(f"#{t}-btn-stop",    Button).disabled = not running
+            self.query_one(f"#{t}-btn-restart", Button).disabled = not running
 
     def update_info(self, info: ServerInfo) -> None:
         self.server_info = info
