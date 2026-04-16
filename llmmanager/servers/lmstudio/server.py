@@ -8,6 +8,7 @@ from typing import AsyncIterator
 import httpx
 
 from llmmanager.config.schema import FlagDefinition, ServerConfig
+from llmmanager.servers.lmstudio.flags import LMSTUDIO_FLAGS
 from llmmanager.exceptions import ServerNotInstalledError
 from llmmanager.models.llm_model import LLMModel, ModelSource
 from llmmanager.models.server import EndpointInfo, ServerInfo, ServerState, ServerStatus
@@ -29,8 +30,11 @@ class LMStudioServer(AbstractServer):
     def __init__(self, config: ServerConfig) -> None:
         super().__init__(config)
         self._port = config.port or 1234
+        api_key = config.flags.get("api-key", "").strip()
+        headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
         self._client = httpx.AsyncClient(
             base_url=f"http://{config.host}:{self._port}",
+            headers=headers,
             timeout=httpx.Timeout(connect=2.0, read=5.0, write=10.0, pool=5.0),
         )
 
@@ -192,7 +196,7 @@ class LMStudioServer(AbstractServer):
 
     @classmethod
     def get_flag_definitions(cls) -> list[FlagDefinition]:
-        return []
+        return LMSTUDIO_FLAGS
 
     # ------------------------------------------------------------------
     # Pre-flight checks

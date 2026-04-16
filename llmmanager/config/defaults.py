@@ -33,6 +33,7 @@ def default_lmstudio_config() -> ServerConfig:
         port=LMSTUDIO_DEFAULT_PORT,
         enabled=True,
         auto_start=False,
+        flags={"api-key": ""},
     )
 
 
