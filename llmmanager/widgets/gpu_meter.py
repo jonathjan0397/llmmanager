@@ -43,8 +43,8 @@ class GPUMeter(Widget):
         width: auto;
         margin: 1 1 0 0;
     }
-    GPUMeter #fan-speed-input-{gpu_index} {
-        width: 6;
+    GPUMeter .fan-speed-input {
+        width: 8;
         margin-right: 1;
     }
     """
@@ -72,6 +72,7 @@ class GPUMeter(Widget):
                 id=f"gpu-{i}-fan-input",
                 restrict=r"[0-9]*",
                 max_length=3,
+                classes="fan-speed-input",
             )
             yield Label("%", id=f"gpu-{i}-fan-pct-label")
             yield Button("Set",  id=f"gpu-{i}-btn-fan-set",  variant="primary")
