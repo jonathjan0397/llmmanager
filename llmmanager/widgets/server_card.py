@@ -34,11 +34,13 @@ class ServerCard(Widget):
 
     DEFAULT_CSS = """
     ServerCard {
+        width: 1fr;
         height: auto;
+        min-height: 10;
         border: round $surface;
         padding: 1 2;
         margin: 0 1 1 0;
-        min-width: 28;
+        min-width: 24;
     }
     ServerCard .card-header {
         text-style: bold;
