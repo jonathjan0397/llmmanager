@@ -112,8 +112,10 @@ class VLLMServer(AbstractServer):
     # ------------------------------------------------------------------
 
     async def list_loaded_models(self) -> list[LLMModel]:
+        # Query the running server first
         raw = await self._api.list_models()
-        return [
+        loaded_ids = {m.get("id", "") for m in raw}
+        models: list[LLMModel] = [
             LLMModel(
                 model_id=m.get("id", ""),
                 display_name=m.get("id", ""),
@@ -122,7 +124,68 @@ class VLLMServer(AbstractServer):
                 is_loaded=True,
             )
             for m in raw
+            if m.get("id")
         ]
+
+        # Always surface the configured --model even when the server is stopped
+        configured = self.config.flags.get("model", "").strip()
+        if configured and configured not in loaded_ids:
+            models.append(LLMModel(
+                model_id=configured,
+                display_name=configured,
+                source=ModelSource.HUGGINGFACE,
+                is_downloaded=await self._is_hf_cached(configured),
+                is_loaded=False,
+            ))
+
+        # Scan HuggingFace cache for any downloaded models not already listed
+        cached = await self._scan_hf_cache()
+        seen = {m.model_id for m in models}
+        for model_id in cached:
+            if model_id not in seen:
+                models.append(LLMModel(
+                    model_id=model_id,
+                    display_name=model_id,
+                    source=ModelSource.HUGGINGFACE,
+                    is_downloaded=True,
+                    is_loaded=False,
+                ))
+
+        return models
+
+    @staticmethod
+    async def _is_hf_cached(model_id: str) -> bool:
+        """Check if a HuggingFace model is present in the local cache."""
+        import os
+        hf_home = os.environ.get("HF_HOME") or os.path.join(
+            os.path.expanduser("~"), ".cache", "huggingface"
+        )
+        hub_dir = os.path.join(hf_home, "hub")
+        # HF stores models as models--org--name
+        slug = "models--" + model_id.replace("/", "--")
+        return os.path.isdir(os.path.join(hub_dir, slug))
+
+    @staticmethod
+    async def _scan_hf_cache() -> list[str]:
+        """Return model IDs for all models found in the HuggingFace hub cache."""
+        import os
+        hf_home = os.environ.get("HF_HOME") or os.path.join(
+            os.path.expanduser("~"), ".cache", "huggingface"
+        )
+        hub_dir = os.path.join(hf_home, "hub")
+        if not os.path.isdir(hub_dir):
+            return []
+        results: list[str] = []
+        try:
+            for entry in os.scandir(hub_dir):
+                if entry.is_dir() and entry.name.startswith("models--"):
+                    # Convert models--org--name → org/name
+                    parts = entry.name[len("models--"):].split("--", 1)
+                    model_id = "/".join(parts) if len(parts) == 2 else parts[0]
+                    results.append(model_id)
+        except OSError:
+            pass
+        return results
 
     async def load_model(self, model_id: str) -> None:
         """vLLM loads one model at server start — restart with new --model flag."""

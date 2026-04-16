@@ -48,8 +48,10 @@ class VLLMAPIClient:
             r = await self._client.get("/v1/models")
             r.raise_for_status()
             return r.json().get("data", [])
-        except httpx.ConnectError as exc:
-            raise ServerNotRunningError("vLLM is not reachable") from exc
+        except (httpx.ConnectError, httpx.TimeoutException):
+            return []
+        except Exception:
+            return []
 
     async def chat_stream(
         self,
