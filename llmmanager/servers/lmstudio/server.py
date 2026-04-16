@@ -31,21 +31,25 @@ class LMStudioServer(AbstractServer):
         self._client: httpx.AsyncClient = self._build_client()
 
     def _build_client(self) -> httpx.AsyncClient:
-        """Build (or rebuild) the httpx client from current config."""
-        # Port: flags["port"] takes precedence over config.port so the flag
-        # form value is always respected after a Save & Poll.
+        """Build (or rebuild) the httpx client for the current host:port.
+
+        Auth headers are NOT stored in the client — they are injected per-request
+        via _auth_headers so that api-key changes take effect immediately without
+        needing a client rebuild.
+        """
         port_flag = self.config.flags.get("port")
         self._port = int(port_flag) if port_flag else (self.config.port or 1234)
-        # Keep config.port in sync so the rest of the app sees the right value.
         self.config.port = self._port
-
-        api_key = self.config.flags.get("api-key", "").strip()
-        headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
         return httpx.AsyncClient(
             base_url=f"http://{self.config.host}:{self._port}",
-            headers=headers,
             timeout=httpx.Timeout(connect=2.0, read=5.0, write=10.0, pool=5.0),
         )
+
+    @property
+    def _auth_headers(self) -> dict:
+        """Read api-key from live config on every call — never stale."""
+        api_key = self.config.flags.get("api-key", "").strip()
+        return {"Authorization": f"Bearer {api_key}"} if api_key else {}
 
     async def refresh_client(self) -> None:
         """Rebuild the HTTP client after connection settings change."""
@@ -134,6 +138,7 @@ class LMStudioServer(AbstractServer):
             r = await self._client.post(
                 "/api/v0/models/load",
                 json={"identifier": model_id},
+                headers=self._auth_headers,
                 timeout=httpx.Timeout(connect=2.0, read=60.0, write=10.0, pool=5.0),
             )
             r.raise_for_status()
@@ -152,6 +157,7 @@ class LMStudioServer(AbstractServer):
             r = await self._client.post(
                 "/api/v0/models/unload",
                 json={"identifier": model_id},
+                headers=self._auth_headers,
                 timeout=httpx.Timeout(connect=2.0, read=30.0, write=10.0, pool=5.0),
             )
             r.raise_for_status()
@@ -211,6 +217,7 @@ class LMStudioServer(AbstractServer):
             "POST",
             "/v1/chat/completions",
             json=payload,
+            headers=self._auth_headers,
             timeout=httpx.Timeout(connect=2.0, read=120.0, write=30.0, pool=5.0),
         ) as r:
             r.raise_for_status()
@@ -280,14 +287,14 @@ class LMStudioServer(AbstractServer):
 
     async def _health(self) -> bool:
         try:
-            r = await self._client.get("/v1/models")
+            r = await self._client.get("/v1/models", headers=self._auth_headers)
             return r.status_code == 200
         except Exception:
             return False
 
     async def _list_models_raw(self) -> list[dict]:
         try:
-            r = await self._client.get("/v1/models")
+            r = await self._client.get("/v1/models", headers=self._auth_headers)
             r.raise_for_status()
             return r.json().get("data", [])
         except Exception:
@@ -296,7 +303,7 @@ class LMStudioServer(AbstractServer):
     async def _list_all_models_raw(self) -> list[dict]:
         """GET /api/v0/models — all models on disk (LM Studio ≥ 0.3.x). Returns [] on older builds."""
         try:
-            r = await self._client.get("/api/v0/models")
+            r = await self._client.get("/api/v0/models", headers=self._auth_headers)
             if r.status_code != 200:
                 return []
             data = r.json()
