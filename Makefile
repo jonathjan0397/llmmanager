@@ -143,4 +143,16 @@ system-deps: ## Check optional system dependencies (GPU tools, clipboard)
 
 .PHONY: version
 version: ## Show current version
-	@$(PYTHON) -c "import llmmanager; print(llmmanager.__version__)"
+	@$(PYTHON) -c "from llmmanager.constants import APP_VERSION; print(APP_VERSION)"
+
+.PHONY: bump
+bump: ## Bump patch version (0.1.1 → 0.1.2)
+	@$(PYTHON) bump_version.py patch
+
+.PHONY: bump-minor
+bump-minor: ## Bump minor version (0.1.x → 0.2.0)
+	@$(PYTHON) bump_version.py minor
+
+.PHONY: bump-major
+bump-major: ## Bump major version (0.x.y → 1.0.0)
+	@$(PYTHON) bump_version.py major
