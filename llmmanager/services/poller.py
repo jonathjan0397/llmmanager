@@ -46,10 +46,16 @@ class PollerService:
         self._queue: asyncio.Queue[PollSnapshot] = asyncio.Queue(maxsize=2)
         self._task: asyncio.Task | None = None
         self._running = False
+        self._latest: PollSnapshot | None = None
 
     @property
     def queue(self) -> asyncio.Queue[PollSnapshot]:
         return self._queue
+
+    @property
+    def latest(self) -> PollSnapshot | None:
+        """Most recent snapshot — readable without consuming the queue."""
+        return self._latest
 
     def set_interval(self, ms: int) -> None:
         self._interval_ms = ms
@@ -73,12 +79,14 @@ class PollerService:
     async def force_poll(self) -> None:
         """Trigger an immediate poll outside the normal interval."""
         snapshot = await self._collect()
+        self._latest = snapshot
         self._enqueue(snapshot)
 
     async def _poll_loop(self) -> None:
         while self._running:
             try:
                 snapshot = await self._collect()
+                self._latest = snapshot
                 self._enqueue(snapshot)
             except Exception:
                 pass  # Never crash the poller — log silently

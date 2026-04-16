@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 from typing import TYPE_CHECKING
 
 import psutil
@@ -130,9 +129,10 @@ class DashboardScreen(Widget):
 
     async def _refresh(self) -> None:
         app: LLMManagerApp = self.app  # type: ignore[assignment]
-        try:
-            snapshot = app.poller.queue.get_nowait()
-        except asyncio.QueueEmpty:
+        if app.poller is None:
+            return
+        snapshot = app.poller.latest
+        if snapshot is None:
             return
 
         for info in snapshot.servers:
