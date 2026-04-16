@@ -5,9 +5,9 @@ from __future__ import annotations
 from typing import Any
 
 from textual.app import ComposeResult
-from textual.containers import Vertical, VerticalScroll
+from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.widget import Widget
-from textual.widgets import Checkbox, Input, Label, Select
+from textual.widgets import Button, Checkbox, Input, Label, Select
 
 from llmmanager.config.schema import FlagDefinition
 
@@ -44,6 +44,16 @@ class FlagForm(Widget):
     }
     FlagForm .restart-banner.visible {
         display: block;
+    }
+    FlagForm .flag-input-row {
+        height: auto;
+    }
+    FlagForm .flag-input-row Input {
+        width: 1fr;
+    }
+    FlagForm .paste-btn {
+        width: 7;
+        margin-left: 1;
     }
     """
 
@@ -89,11 +99,18 @@ class FlagForm(Widget):
                             id=f"flag-{key}",
                         )
                     else:
-                        yield Input(
-                            value=str(current) if current is not None else "",
-                            placeholder=str(flag.default) if flag.default is not None else "",
-                            id=f"flag-{key}",
-                        )
+                        with Horizontal(classes="flag-input-row"):
+                            yield Input(
+                                value=str(current) if current is not None else "",
+                                placeholder=str(flag.default) if flag.default is not None else "",
+                                id=f"flag-{key}",
+                            )
+                            yield Button(
+                                "Paste",
+                                id=f"paste-{key}",
+                                classes="paste-btn",
+                                variant="default",
+                            )
 
     def get_values(self) -> dict[str, Any]:
         """Collect current form values. Call before saving config."""
@@ -126,6 +143,20 @@ class FlagForm(Widget):
             except Exception:
                 result[key] = self._values.get(key, flag.default)
         return result
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        btn_id = event.button.id or ""
+        if not btn_id.startswith("paste-"):
+            return
+        key = btn_id.removeprefix("paste-")
+        try:
+            import pyperclip
+            text = pyperclip.paste()
+            if text:
+                self.query_one(f"#flag-{key}", Input).value = text.strip()
+        except Exception:
+            pass  # Clipboard unavailable — fail silently
+        event.stop()
 
     def on_input_changed(self, event: Input.Changed) -> None:
         self._check_restart_banner(event.input.id or "")

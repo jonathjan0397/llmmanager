@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "llmmanager"
-version = "0.1.7"
+version = "0.1.8"
 description = "TUI control panel for LLM server stacks (Ollama, vLLM, llama.cpp, LM Studio)"
 readme = "README.md"
 requires-python = ">=3.11"
