@@ -31,7 +31,7 @@ def default_lmstudio_config() -> ServerConfig:
     return ServerConfig(
         server_type="lmstudio",
         port=LMSTUDIO_DEFAULT_PORT,
-        enabled=False,
+        enabled=True,
         auto_start=False,
     )
 

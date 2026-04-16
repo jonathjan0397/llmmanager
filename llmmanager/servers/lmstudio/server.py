@@ -29,6 +29,10 @@ class LMStudioServer(AbstractServer):
     def __init__(self, config: ServerConfig) -> None:
         super().__init__(config)
         self._port = config.port or 1234
+        self._client = httpx.AsyncClient(
+            base_url=f"http://{config.host}:{self._port}",
+            timeout=httpx.Timeout(connect=2.0, read=5.0, write=10.0, pool=5.0),
+        )
 
     # ------------------------------------------------------------------
     # Lifecycle — not supported
@@ -127,33 +131,39 @@ class LMStudioServer(AbstractServer):
     # Quick inference
     # ------------------------------------------------------------------
 
-    async def quick_infer(self, model_id: str, prompt: str) -> AsyncIterator[str]:
+    async def quick_infer(self, model_id: str, prompt: str, **kwargs) -> AsyncIterator[str]:
+        messages = [{"role": "user", "content": prompt}]
+        async for token in self.chat_infer(model_id, messages, **kwargs):
+            yield token
+
+    async def chat_infer(
+        self, model_id: str, messages: list[dict[str, str]], **kwargs
+    ) -> AsyncIterator[str]:
         import json
-        base = f"http://{self.config.host}:{self._port}"
-        payload = {
-            "model": model_id,
-            "messages": [{"role": "user", "content": prompt}],
-            "stream": True,
-        }
-        async with httpx.AsyncClient(timeout=120.0) as client:
-            async with client.stream("POST", f"{base}/v1/chat/completions", json=payload) as r:
-                r.raise_for_status()
-                async for line in r.aiter_lines():
-                    if line.startswith("data: "):
-                        data = line[6:].strip()
-                        if data == "[DONE]":
-                            break
-                        try:
-                            chunk = json.loads(data)
-                            content = (
-                                chunk.get("choices", [{}])[0]
-                                .get("delta", {})
-                                .get("content", "")
-                            )
-                            if content:
-                                yield content
-                        except json.JSONDecodeError:
-                            continue
+        payload = {"model": model_id, "messages": messages, "stream": True, **kwargs}
+        async with self._client.stream(
+            "POST",
+            "/v1/chat/completions",
+            json=payload,
+            timeout=httpx.Timeout(connect=2.0, read=120.0, write=30.0, pool=5.0),
+        ) as r:
+            r.raise_for_status()
+            async for line in r.aiter_lines():
+                if line.startswith("data: "):
+                    data = line[6:].strip()
+                    if data == "[DONE]":
+                        break
+                    try:
+                        chunk = json.loads(data)
+                        content = (
+                            chunk.get("choices", [{}])[0]
+                            .get("delta", {})
+                            .get("content", "")
+                        )
+                        if content:
+                            yield content
+                    except json.JSONDecodeError:
+                        continue
 
     # ------------------------------------------------------------------
     # Installation — not supported (point to download page)
@@ -204,21 +214,15 @@ class LMStudioServer(AbstractServer):
 
     async def _health(self) -> bool:
         try:
-            async with httpx.AsyncClient(timeout=3.0) as client:
-                r = await client.get(
-                    f"http://{self.config.host}:{self._port}/v1/models"
-                )
-                return r.status_code == 200
+            r = await self._client.get("/v1/models")
+            return r.status_code == 200
         except Exception:
             return False
 
     async def _list_models_raw(self) -> list[dict]:
         try:
-            async with httpx.AsyncClient(timeout=5.0) as client:
-                r = await client.get(
-                    f"http://{self.config.host}:{self._port}/v1/models"
-                )
-                r.raise_for_status()
-                return r.json().get("data", [])
+            r = await self._client.get("/v1/models")
+            r.raise_for_status()
+            return r.json().get("data", [])
         except Exception:
             return []
