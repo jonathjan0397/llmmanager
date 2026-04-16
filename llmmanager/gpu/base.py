@@ -41,8 +41,13 @@ class AbstractGPUProvider(ABC):
         return False, "Fan control is not supported for this GPU vendor."
 
     async def set_fan_auto(self, gpu_index: int) -> tuple[bool, str]:
-        """
-        Return fan to automatic/temperature-driven control.
-        Returns (success, message).
-        """
+        """Return fan to automatic/temperature-driven control. Returns (success, message)."""
+        return False, "Fan control is not supported for this GPU vendor."
+
+    async def set_fan_speed_sudo(self, gpu_index: int, speed_pct: int, sudo_password: str) -> tuple[bool, str]:
+        """set_fan_speed via sudo fallback. Subclasses implement where supported."""
+        return False, "Fan control is not supported for this GPU vendor."
+
+    async def set_fan_auto_sudo(self, gpu_index: int, sudo_password: str) -> tuple[bool, str]:
+        """set_fan_auto via sudo fallback. Subclasses implement where supported."""
         return False, "Fan control is not supported for this GPU vendor."

@@ -113,5 +113,50 @@ class AMDProvider(AbstractGPUProvider):
         except Exception as exc:
             return False, str(exc)
 
+    async def set_fan_speed_sudo(self, gpu_index: int, speed_pct: int, sudo_password: str) -> tuple[bool, str]:
+        speed_pct = max(0, min(100, speed_pct))
+        pwm_value = int(speed_pct / 100 * 255)
+        import glob as _glob
+        pattern = f"/sys/class/drm/card{gpu_index}/device/hwmon/hwmon*"
+        dirs = _glob.glob(pattern)
+        if not dirs:
+            return False, f"hwmon path not found for card{gpu_index}"
+        hwmon = dirs[0]
+        ok, msg = await asyncio.to_thread(self._sudo_sysfs_write, f"{hwmon}/pwm1_enable", "1", sudo_password)
+        if not ok:
+            return False, msg
+        ok, msg = await asyncio.to_thread(self._sudo_sysfs_write, f"{hwmon}/pwm1", str(pwm_value), sudo_password)
+        return (True, f"GPU {gpu_index}: fans set to {speed_pct}%") if ok else (False, msg)
+
+    async def set_fan_auto_sudo(self, gpu_index: int, sudo_password: str) -> tuple[bool, str]:
+        import glob as _glob
+        pattern = f"/sys/class/drm/card{gpu_index}/device/hwmon/hwmon*"
+        dirs = _glob.glob(pattern)
+        if not dirs:
+            return False, f"hwmon path not found for card{gpu_index}"
+        hwmon = dirs[0]
+        ok, msg = await asyncio.to_thread(self._sudo_sysfs_write, f"{hwmon}/pwm1_enable", "2", sudo_password)
+        return (True, f"GPU {gpu_index}: fans returned to automatic control") if ok else (False, msg)
+
+    def _sudo_sysfs_write(self, path: str, value: str, sudo_password: str) -> tuple[bool, str]:
+        import subprocess
+        try:
+            proc = subprocess.run(
+                ["sudo", "-S", "sh", "-c", f"echo {value} > {path}"],
+                input=f"{sudo_password}\n".encode(),
+                capture_output=True,
+                timeout=10,
+            )
+            if proc.returncode != 0:
+                err = proc.stderr.decode().strip()
+                if any(w in err.lower() for w in ("incorrect password", "authentication failure", "sorry")):
+                    return False, "Incorrect sudo password."
+                return False, f"sudo error: {err}"
+            return True, "ok"
+        except subprocess.TimeoutExpired:
+            return False, "sudo timed out."
+        except Exception as exc:
+            return False, str(exc)
+
     async def shutdown(self) -> None:
         pass

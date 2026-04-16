@@ -11,6 +11,11 @@ from textual.widgets import Button, Input, Label, ProgressBar
 from llmmanager.models.gpu import GPUInfo
 
 
+def _is_permission_error(msg: str) -> bool:
+    m = msg.lower()
+    return any(w in m for w in ("permission denied", "requires root", "insufficient permissions"))
+
+
 class GPUMeter(Widget):
     """Displays stats for a single GPU: name, VRAM bar, utilization, temp, power, fan control."""
 
@@ -141,12 +146,34 @@ class GPUMeter(Widget):
             return
         speed = max(0, min(100, int(raw)))
         ok, msg = await self.app.gpu_provider.set_fan_speed(i, speed)  # type: ignore[attr-defined]
-        self.notify(msg, severity="information" if ok else "error")
+        if not ok and _is_permission_error(msg):
+            ok, msg = await self._retry_with_sudo("set_fan_speed", i, speed)
+        if ok:
+            self.notify(
+                f"{msg}  —  Remember to click Auto when done to restore automatic fan control.",
+                severity="information",
+            )
+        else:
+            self.notify(msg, severity="error")
 
     async def _set_fan_auto(self) -> None:
         i = self._gpu_index
         ok, msg = await self.app.gpu_provider.set_fan_auto(i)  # type: ignore[attr-defined]
+        if not ok and _is_permission_error(msg):
+            ok, msg = await self._retry_with_sudo("set_fan_auto", i)
         self.notify(msg, severity="information" if ok else "error")
+
+    async def _retry_with_sudo(self, operation: str, gpu_index: int, speed: int | None = None) -> tuple[bool, str]:
+        from llmmanager.widgets.sudo_dialog import SudoDialog
+        sudo_pw = await self.app.push_screen_wait(
+            SudoDialog("Fan control requires root. Enter sudo password.")
+        )
+        if sudo_pw is None:
+            return False, "Cancelled."
+        provider = self.app.gpu_provider  # type: ignore[attr-defined]
+        if operation == "set_fan_speed" and speed is not None:
+            return await provider.set_fan_speed_sudo(gpu_index, speed, sudo_pw)
+        return await provider.set_fan_auto_sudo(gpu_index, sudo_pw)
 
     def update_gpu(self, info: GPUInfo) -> None:
         self.gpu_info = info

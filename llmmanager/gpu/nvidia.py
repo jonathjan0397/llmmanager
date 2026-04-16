@@ -190,6 +190,48 @@ class NvidiaProvider(AbstractGPUProvider):
                 return False, "Permission denied — fan control requires root on Linux."
             return False, f"NVML error: {msg}"
 
+    async def set_fan_speed_sudo(self, gpu_index: int, speed_pct: int, sudo_password: str) -> tuple[bool, str]:
+        speed_pct = max(0, min(100, speed_pct))
+        script = (
+            f"import pynvml; pynvml.nvmlInit(); "
+            f"h=pynvml.nvmlDeviceGetHandleByIndex({gpu_index}); "
+            f"n=pynvml.nvmlDeviceGetNumFans(h) if hasattr(pynvml,'nvmlDeviceGetNumFans') else 1; "
+            f"[pynvml.nvmlDeviceSetFanControlPolicy(h,f,0) or "
+            f"pynvml.nvmlDeviceSetFanSpeed_v2(h,f,{speed_pct}) for f in range(n)]"
+        )
+        ok, msg = await asyncio.to_thread(self._run_sudo_python, script, sudo_password)
+        return (True, f"GPU {gpu_index}: fans set to {speed_pct}%") if ok else (False, msg)
+
+    async def set_fan_auto_sudo(self, gpu_index: int, sudo_password: str) -> tuple[bool, str]:
+        script = (
+            f"import pynvml; pynvml.nvmlInit(); "
+            f"h=pynvml.nvmlDeviceGetHandleByIndex({gpu_index}); "
+            f"n=pynvml.nvmlDeviceGetNumFans(h) if hasattr(pynvml,'nvmlDeviceGetNumFans') else 1; "
+            f"[pynvml.nvmlDeviceSetFanControlPolicy(h,f,1) for f in range(n)]"
+        )
+        ok, msg = await asyncio.to_thread(self._run_sudo_python, script, sudo_password)
+        return (True, f"GPU {gpu_index}: fans returned to automatic control") if ok else (False, msg)
+
+    def _run_sudo_python(self, script: str, sudo_password: str) -> tuple[bool, str]:
+        import subprocess, sys
+        try:
+            proc = subprocess.run(
+                ["sudo", "-S", sys.executable, "-c", script],
+                input=f"{sudo_password}\n".encode(),
+                capture_output=True,
+                timeout=30,
+            )
+            if proc.returncode != 0:
+                err = proc.stderr.decode().strip()
+                if any(w in err.lower() for w in ("incorrect password", "authentication failure", "sorry")):
+                    return False, "Incorrect sudo password."
+                return False, f"sudo error: {err}"
+            return True, "ok"
+        except subprocess.TimeoutExpired:
+            return False, "sudo timed out."
+        except Exception as exc:
+            return False, str(exc)
+
     async def shutdown(self) -> None:
         await asyncio.to_thread(self._shutdown_sync)
 
