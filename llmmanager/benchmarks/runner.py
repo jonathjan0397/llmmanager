@@ -182,16 +182,17 @@ class BenchmarkRunner:
         start = time.monotonic()
         vram_before = await self._current_vram_mb()
 
+        # Cap every level — prevents indefinite hang on slow/CPU-only hardware
+        per_level_timeout = min(
+            config.sustained_duration_s,
+            config.safety_max_p99_ms / 1000.0,
+        )
+
         tasks = [
             asyncio.create_task(self._timed_infer(config))
             for _ in range(level)
         ]
 
-        # Cap every level — prevents indefinite hang on slow/CPU-only hardware
-        per_level_timeout = min(
-            config.sustained_duration_s,
-            config.safety_max_p99_latency_ms / 1000.0,
-        )
         try:
             results_raw = await asyncio.wait_for(
                 asyncio.gather(*tasks, return_exceptions=True),
@@ -200,6 +201,8 @@ class BenchmarkRunner:
         except asyncio.TimeoutError:
             for t in tasks:
                 t.cancel()
+            # Wait for all tasks to finish cancelling before proceeding
+            await asyncio.gather(*tasks, return_exceptions=True)
             results_raw = [asyncio.TimeoutError(f"timed out after {per_level_timeout:.0f}s")] * level
 
         total_ms = (time.monotonic() - start) * 1000
