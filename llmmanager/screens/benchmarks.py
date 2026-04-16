@@ -26,6 +26,7 @@ from textual.widgets import (
 )
 
 from llmmanager.benchmarks.runner import BenchmarkRunner
+from llmmanager.benchmarks.mlperf_runner import MLPerfConfig, MLPerfRunner, MLPerfScenario
 from llmmanager.constants import BENCHMARK_DIR, BENCHMARK_CONCURRENCY_LEVELS
 from llmmanager.models.benchmark import (
     BenchmarkCategory,
@@ -100,6 +101,33 @@ class BenchmarksScreen(Widget):
     .chart-body {
         padding: 0 1;
     }
+
+    #mlperf-form {
+        height: 1fr;
+        padding: 0 1;
+    }
+
+    #mlperf-model-row {
+        height: auto;
+        margin-bottom: 1;
+    }
+
+    #mlperf-run-controls Button { width: 1fr; }
+
+    #mlperf-hints {
+        color: $text-muted;
+        margin-bottom: 1;
+    }
+
+    #mlperf-loadgen-status {
+        margin-bottom: 1;
+    }
+
+    #mlperf-live-status {
+        height: auto;
+        color: $accent;
+        margin-top: 1;
+    }
     """
 
     BINDINGS = [
@@ -111,6 +139,7 @@ class BenchmarksScreen(Widget):
         super().__init__()
         self._current_run: asyncio.Task | None = None
         self._last_results: list[BenchmarkResult] = []
+        self._mlperf_run: asyncio.Task | None = None
 
     def compose(self) -> ComposeResult:
         with TabbedContent(id="bench-tabs"):
@@ -187,6 +216,96 @@ class BenchmarksScreen(Widget):
                 yield DataTable(id="history-table", cursor_type="row")
                 yield Button("View Details", id="btn-view-history", variant="default")
 
+            # ── MLPerf ───────────────────────────────────────────────────
+            with TabPane("MLPerf", id="tab-mlperf"):
+                with Vertical(id="mlperf-form"):
+                    yield Label("Server:", classes="form-label")
+                    yield Select(
+                        options=[
+                            ("Ollama",    "ollama"),
+                            ("vLLM",      "vllm"),
+                            ("llama.cpp", "llamacpp"),
+                        ],
+                        value="ollama",
+                        id="mlperf-server-select",
+                    )
+                    yield Label("Model:", classes="form-label")
+                    yield Select(
+                        options=[("—", "__none__")],
+                        value="__none__",
+                        id="mlperf-model-select",
+                    )
+                    with Horizontal(id="mlperf-model-row"):
+                        yield Button("↻ Refresh", id="btn-mlperf-refresh-models", variant="default")
+                    yield Label("Scenario:", classes="form-label")
+                    yield Select(
+                        options=[
+                            ("SingleStream  (latency — sequential queries)",          "SingleStream"),
+                            ("Offline       (throughput — all queries at once)",      "Offline"),
+                            ("Server        (Poisson arrival — latency under load)",  "Server"),
+                        ],
+                        value="SingleStream",
+                        id="mlperf-scenario-select",
+                    )
+                    yield Label("Samples (# queries):", classes="form-label")
+                    yield Select(
+                        options=[
+                            ("8   (quick test)", "8"),
+                            ("24  (standard)",   "24"),
+                            ("50  (extended)",   "50"),
+                            ("100 (full)",       "100"),
+                        ],
+                        value="24",
+                        id="mlperf-samples-select",
+                    )
+                    yield Label("Max output tokens per query:", classes="form-label")
+                    yield Select(
+                        options=[
+                            ("64",  "64"),
+                            ("128", "128"),
+                            ("256", "256"),
+                            ("512", "512"),
+                        ],
+                        value="128",
+                        id="mlperf-tokens-select",
+                    )
+                    yield Label("Server target QPS  [Server scenario only]:", classes="form-label")
+                    yield Select(
+                        options=[
+                            ("0.5 QPS", "0.5"),
+                            ("1.0 QPS", "1.0"),
+                            ("2.0 QPS", "2.0"),
+                            ("4.0 QPS", "4.0"),
+                        ],
+                        value="1.0",
+                        id="mlperf-qps-select",
+                    )
+                    yield Static(
+                        "[dim]SLOs — SingleStream: 90th-pct E2E < 2000 ms  |  "
+                        "Offline: TPS ≥ 10  |  "
+                        "Server: 99th-pct TTFT < 2000 ms AND TPOT < 200 ms\n"
+                        "Prompts: 25-item Open ORCA / HumanEval / GSM8K set "
+                        "(MLPerf Inference v4.0 open-division LLM workloads)[/]",
+                        id="mlperf-hints",
+                    )
+                    if MLPerfRunner.loadgen_available():
+                        yield Static(
+                            "[green]mlperf_loadgen detected — official scheduler active.[/]",
+                            id="mlperf-loadgen-status",
+                        )
+                    else:
+                        yield Static(
+                            "[yellow]mlperf_loadgen not installed[/]  "
+                            "[dim]— pip install mlperf-loadgen for certified results[/]",
+                            id="mlperf-loadgen-status",
+                        )
+                    with Horizontal(id="mlperf-run-controls"):
+                        yield Button("Run MLPerf", id="btn-mlperf-run",    variant="primary")
+                        yield Button("Cancel",     id="btn-mlperf-cancel", variant="error",
+                                     disabled=True)
+                    yield Static("", id="mlperf-live-status")
+                    yield LogView(max_lines=400, id="mlperf-log")
+
     # ── Mount ────────────────────────────────────────────────────────────────
 
     def on_mount(self) -> None:
@@ -197,6 +316,7 @@ class BenchmarksScreen(Widget):
         )
         self.run_worker(self._load_history(table))
         self.run_worker(self._populate_model_list())
+        self.run_worker(self._populate_mlperf_model_list())
 
     # ── Model list ───────────────────────────────────────────────────────────
 
@@ -218,6 +338,8 @@ class BenchmarksScreen(Widget):
     def on_select_changed(self, event: Select.Changed) -> None:
         if event.select.id == "bench-server-select":
             self.run_worker(self._populate_model_list())
+        elif event.select.id == "mlperf-server-select":
+            self.run_worker(self._populate_mlperf_model_list())
 
     # ── Button handler ───────────────────────────────────────────────────────
 
@@ -237,6 +359,12 @@ class BenchmarksScreen(Widget):
                 self.query_one("#bench-model-list", SelectionList).deselect_all()
             case "btn-view-history":
                 pass  # TODO: expand selected history row
+            case "btn-mlperf-run":
+                self.run_worker(self._run_mlperf())
+            case "btn-mlperf-cancel":
+                self._cancel_mlperf()
+            case "btn-mlperf-refresh-models":
+                self.run_worker(self._populate_mlperf_model_list())
 
     # ── Benchmark orchestration ──────────────────────────────────────────────
 
@@ -481,6 +609,100 @@ class BenchmarksScreen(Widget):
     def _cancel_benchmark(self) -> None:
         if self._current_run and not self._current_run.done():
             self._current_run.cancel()
+
+    # ── MLPerf ───────────────────────────────────────────────────────────────
+
+    async def _populate_mlperf_model_list(self) -> None:
+        app: LLMManagerApp = self.app  # type: ignore[assignment]
+        server_type = str(self.query_one("#mlperf-server-select", Select).value)
+        server = app.registry.get(server_type)
+        sel = self.query_one("#mlperf-model-select", Select)
+        if server is None:
+            sel.set_options([("—", "__none__")])
+            return
+        try:
+            models = await server.list_loaded_models()
+        except Exception:
+            models = []
+        if models:
+            sel.set_options([(m.display_name, m.model_id) for m in models])
+            sel.value = models[0].model_id
+        else:
+            sel.set_options([("No models available", "__none__")])
+
+    async def _run_mlperf(self) -> None:
+        import time as _time
+        app: LLMManagerApp = self.app  # type: ignore[assignment]
+
+        server_type  = str(self.query_one("#mlperf-server-select",  Select).value)
+        model_id     = str(self.query_one("#mlperf-model-select",   Select).value)
+        scenario_val = str(self.query_one("#mlperf-scenario-select", Select).value)
+        num_samples  = int(self.query_one("#mlperf-samples-select", Select).value)
+        out_tokens   = int(self.query_one("#mlperf-tokens-select",  Select).value)
+        qps          = float(self.query_one("#mlperf-qps-select",   Select).value)
+
+        log    = self.query_one("#mlperf-log",         LogView)
+        status = self.query_one("#mlperf-live-status", Static)
+
+        if model_id == "__none__":
+            self.notify("Select a model first.", severity="warning")
+            return
+
+        server = app.registry.get(server_type)
+        if server is None:
+            self.notify(f"Server '{server_type}' not found.", severity="error")
+            return
+
+        self.query_one("#btn-mlperf-run",    Button).disabled = True
+        self.query_one("#btn-mlperf-cancel", Button).disabled = False
+
+        log.clear_log()
+        cfg = MLPerfConfig(
+            scenario=MLPerfScenario(scenario_val),
+            num_samples=num_samples,
+            output_tokens=out_tokens,
+            server_target_qps=qps,
+        )
+        runner = MLPerfRunner(
+            server=server,
+            model_id=model_id,
+            config=cfg,
+            gpu_provider=app.gpu_provider,  # type: ignore[attr-defined]
+        )
+
+        run_start = _time.monotonic()
+        self._mlperf_run = asyncio.current_task()
+
+        try:
+            async for msg, result in runner.run():
+                log.append_line(msg)
+                elapsed = int(_time.monotonic() - run_start)
+                status.update(
+                    f"[bold]Scenario:[/] {scenario_val}  "
+                    f"[bold]Model:[/] {model_id}  "
+                    f"[bold]Elapsed:[/] {elapsed//60:02d}:{elapsed%60:02d}"
+                )
+                if result is not None:
+                    status.update(
+                        f"[bold {'green' if result.passed else 'red'}]"
+                        f"{'PASS' if result.passed else 'FAIL'}[/]  "
+                        f"TPS {result.tokens_per_sec:.1f}  "
+                        f"TTFT {result.ttft.mean:.0f} ms"
+                        if result.ttft else ""
+                    )
+                    log.append_line(
+                        f"\nReport saved to: "
+                        f"{runner._output_dir / ''}"
+                    )
+        except asyncio.CancelledError:
+            log.append_line("[MLPerf] Run cancelled.")
+        finally:
+            self.query_one("#btn-mlperf-run",    Button).disabled = False
+            self.query_one("#btn-mlperf-cancel", Button).disabled = True
+
+    def _cancel_mlperf(self) -> None:
+        if self._mlperf_run and not self._mlperf_run.done():
+            self._mlperf_run.cancel()
 
     def _cat_enabled(self, cat: BenchmarkCategory) -> bool:
         try:
