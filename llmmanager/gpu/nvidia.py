@@ -136,7 +136,7 @@ class NvidiaProvider(AbstractGPUProvider):
             except Exception:
                 num_fans = 1
 
-            NVML_FAN_POLICY_MANUAL = 0
+            NVML_FAN_POLICY_MANUAL = 1  # nvml.h: TEMPERATURE_CONTINOUS_SW=0, MANUAL=1
             for fan_idx in range(num_fans):
                 pynvml.nvmlDeviceSetFanControlPolicy(handle, fan_idx, NVML_FAN_POLICY_MANUAL)
                 pynvml.nvmlDeviceSetFanSpeed_v2(handle, fan_idx, speed_pct)
@@ -175,10 +175,10 @@ class NvidiaProvider(AbstractGPUProvider):
             except Exception:
                 num_fans = 1
 
-            NVML_FAN_POLICY_TEMPERATURE_CONTINOUS_SW = 1
+            NVML_FAN_POLICY_AUTO = 0  # nvml.h: TEMPERATURE_CONTINOUS_SW=0
             for fan_idx in range(num_fans):
                 pynvml.nvmlDeviceSetFanControlPolicy(
-                    handle, fan_idx, NVML_FAN_POLICY_TEMPERATURE_CONTINOUS_SW
+                    handle, fan_idx, NVML_FAN_POLICY_AUTO
                 )
 
             return True, f"GPU {gpu_index}: fans returned to automatic control"
@@ -196,7 +196,7 @@ class NvidiaProvider(AbstractGPUProvider):
             f"import pynvml; pynvml.nvmlInit(); "
             f"h=pynvml.nvmlDeviceGetHandleByIndex({gpu_index}); "
             f"n=pynvml.nvmlDeviceGetNumFans(h) if hasattr(pynvml,'nvmlDeviceGetNumFans') else 1; "
-            f"[pynvml.nvmlDeviceSetFanControlPolicy(h,f,0) or "
+            f"[pynvml.nvmlDeviceSetFanControlPolicy(h,f,1) or "
             f"pynvml.nvmlDeviceSetFanSpeed_v2(h,f,{speed_pct}) for f in range(n)]"
         )
         ok, msg = await asyncio.to_thread(self._run_sudo_python, script, sudo_password)
@@ -207,7 +207,7 @@ class NvidiaProvider(AbstractGPUProvider):
             f"import pynvml; pynvml.nvmlInit(); "
             f"h=pynvml.nvmlDeviceGetHandleByIndex({gpu_index}); "
             f"n=pynvml.nvmlDeviceGetNumFans(h) if hasattr(pynvml,'nvmlDeviceGetNumFans') else 1; "
-            f"[pynvml.nvmlDeviceSetFanControlPolicy(h,f,1) for f in range(n)]"
+            f"[pynvml.nvmlDeviceSetFanControlPolicy(h,f,0) for f in range(n)]"
         )
         ok, msg = await asyncio.to_thread(self._run_sudo_python, script, sudo_password)
         return (True, f"GPU {gpu_index}: fans returned to automatic control") if ok else (False, msg)
