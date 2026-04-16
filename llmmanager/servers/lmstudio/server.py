@@ -28,14 +28,30 @@ class LMStudioServer(AbstractServer):
 
     def __init__(self, config: ServerConfig) -> None:
         super().__init__(config)
-        self._port = config.port or 1234
-        api_key = config.flags.get("api-key", "").strip()
+        self._client: httpx.AsyncClient = self._build_client()
+
+    def _build_client(self) -> httpx.AsyncClient:
+        """Build (or rebuild) the httpx client from current config."""
+        # Port: flags["port"] takes precedence over config.port so the flag
+        # form value is always respected after a Save & Poll.
+        port_flag = self.config.flags.get("port")
+        self._port = int(port_flag) if port_flag else (self.config.port or 1234)
+        # Keep config.port in sync so the rest of the app sees the right value.
+        self.config.port = self._port
+
+        api_key = self.config.flags.get("api-key", "").strip()
         headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
-        self._client = httpx.AsyncClient(
-            base_url=f"http://{config.host}:{self._port}",
+        return httpx.AsyncClient(
+            base_url=f"http://{self.config.host}:{self._port}",
             headers=headers,
             timeout=httpx.Timeout(connect=2.0, read=5.0, write=10.0, pool=5.0),
         )
+
+    async def refresh_client(self) -> None:
+        """Rebuild the HTTP client after connection settings change."""
+        old = self._client
+        self._client = self._build_client()
+        await old.aclose()
 
     # ------------------------------------------------------------------
     # Lifecycle — not supported

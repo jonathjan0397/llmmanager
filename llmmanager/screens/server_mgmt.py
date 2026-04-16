@@ -317,6 +317,10 @@ class ServerManagementScreen(Widget):
 
     async def _poll_lmstudio(self, server: "AbstractServer") -> None:
         """Save settings and verify LM Studio is reachable at the configured host:port."""
+        # Rebuild the HTTP client so the just-saved port and api-key are applied
+        from llmmanager.servers.lmstudio.server import LMStudioServer
+        if isinstance(server, LMStudioServer):
+            await server.refresh_client()
         host = server.config.host
         port = server.config.port
         self.notify(f"Settings saved. Checking LM Studio at {host}:{port}…")
