@@ -149,14 +149,27 @@ class FlagForm(Widget):
         if not btn_id.startswith("paste-"):
             return
         key = btn_id.removeprefix("paste-")
+        # Try system clipboard first (works on desktop); fall back to dialog
+        # (works in PuTTY / SSH where no X11 clipboard is available).
+        pasted = False
         try:
             import pyperclip
             text = pyperclip.paste()
-            if text:
+            if text and text.strip():
                 self.query_one(f"#flag-{key}", Input).value = text.strip()
+                pasted = True
         except Exception:
-            pass  # Clipboard unavailable — fail silently
+            pass
+        if not pasted:
+            self.run_worker(self._paste_via_dialog(key))
         event.stop()
+
+    async def _paste_via_dialog(self, key: str) -> None:
+        from llmmanager.widgets.paste_dialog import PasteDialog
+        # Derive a friendly field name from the flag key (e.g. "api-key" -> "api-key")
+        value = await self.app.push_screen_wait(PasteDialog(field_name=key))
+        if value:
+            self.query_one(f"#flag-{key}", Input).value = value
 
     def on_input_changed(self, event: Input.Changed) -> None:
         self._check_restart_banner(event.input.id or "")

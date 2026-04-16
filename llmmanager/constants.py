@@ -4,7 +4,7 @@ from pathlib import Path
 from platformdirs import user_config_dir, user_data_dir
 
 APP_NAME = "llmmanager"
-APP_VERSION = "0.1.8"
+APP_VERSION = "0.1.9"
 APP_DISPLAY_NAME = "LLM Manager"
 
 # Config and data directories
