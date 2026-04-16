@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import shutil
 from typing import AsyncIterator
 
 import httpx
@@ -84,6 +83,23 @@ class LMStudioServer(AbstractServer):
     # ------------------------------------------------------------------
 
     async def list_loaded_models(self) -> list[LLMModel]:
+        # Try /api/v0/models first — returns all available models (LM Studio ≥ 0.3.x)
+        all_models = await self._list_all_models_raw()
+        if all_models:
+            loaded_ids = {m.get("id", "") for m in await self._list_models_raw()}
+            return [
+                LLMModel(
+                    model_id=m.get("path") or m.get("id", ""),
+                    display_name=m.get("id") or m.get("path", ""),
+                    source=ModelSource.LOCAL,
+                    is_downloaded=True,
+                    is_loaded=(m.get("path") or m.get("id", "")) in loaded_ids
+                    or m.get("id", "") in loaded_ids,
+                )
+                for m in all_models
+                if m.get("path") or m.get("id")
+            ]
+        # Fallback: only currently loaded models via OpenAI-compat /v1/models
         raw = await self._list_models_raw()
         return [
             LLMModel(
@@ -97,10 +113,40 @@ class LMStudioServer(AbstractServer):
         ]
 
     async def load_model(self, model_id: str) -> None:
-        raise NotImplementedError("Use the LM Studio GUI to load models.")
+        """Load a model via LM Studio's /api/v0/models/load endpoint."""
+        try:
+            r = await self._client.post(
+                "/api/v0/models/load",
+                json={"identifier": model_id},
+                timeout=httpx.Timeout(connect=2.0, read=60.0, write=10.0, pool=5.0),
+            )
+            r.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            raise RuntimeError(
+                f"LM Studio rejected load request for '{model_id}': {exc.response.status_code}"
+            ) from exc
+        except Exception as exc:
+            raise RuntimeError(
+                f"Could not load '{model_id}' — is LM Studio running with the local server enabled? ({exc})"
+            ) from exc
 
     async def unload_model(self, model_id: str) -> None:
-        raise NotImplementedError("Use the LM Studio GUI to unload models.")
+        """Unload a model via LM Studio's /api/v0/models/unload endpoint."""
+        try:
+            r = await self._client.post(
+                "/api/v0/models/unload",
+                json={"identifier": model_id},
+                timeout=httpx.Timeout(connect=2.0, read=30.0, write=10.0, pool=5.0),
+            )
+            r.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            raise RuntimeError(
+                f"LM Studio rejected unload request for '{model_id}': {exc.response.status_code}"
+            ) from exc
+        except Exception as exc:
+            raise RuntimeError(
+                f"Could not unload '{model_id}' — is LM Studio running? ({exc})"
+            ) from exc
 
     async def delete_model(self, model_id: str) -> None:
         raise NotImplementedError("Use the LM Studio GUI to delete models.")
@@ -228,5 +274,19 @@ class LMStudioServer(AbstractServer):
             r = await self._client.get("/v1/models")
             r.raise_for_status()
             return r.json().get("data", [])
+        except Exception:
+            return []
+
+    async def _list_all_models_raw(self) -> list[dict]:
+        """GET /api/v0/models — all models on disk (LM Studio ≥ 0.3.x). Returns [] on older builds."""
+        try:
+            r = await self._client.get("/api/v0/models")
+            if r.status_code != 200:
+                return []
+            data = r.json()
+            # Response is either {"data": [...]} or a plain list
+            if isinstance(data, list):
+                return data
+            return data.get("data", [])
         except Exception:
             return []
