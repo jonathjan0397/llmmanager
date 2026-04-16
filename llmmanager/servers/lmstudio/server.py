@@ -197,7 +197,11 @@ class LMStudioServer(AbstractServer):
     # ------------------------------------------------------------------
 
     async def stream_logs(self) -> AsyncIterator[str]:
-        yield "LM Studio log streaming is not supported. Check the LM Studio GUI."
+        yield "LM Studio does not expose a log stream. Check the LM Studio GUI for logs."
+        # Park here forever so the log tailer never loops and re-emits the message.
+        import asyncio
+        while True:
+            await asyncio.sleep(3600)
 
     # ------------------------------------------------------------------
     # Quick inference

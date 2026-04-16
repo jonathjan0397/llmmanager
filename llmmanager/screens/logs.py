@@ -97,6 +97,11 @@ class LogsScreen(Widget):
     def on_select_changed(self, event: Select.Changed) -> None:
         if event.select.id == "server-select":
             self._selected_server = str(event.value)
+            stats = self.query_one("#log-stats", Label)
+            if self._selected_server == "lmstudio":
+                stats.update("[yellow]LM Studio does not stream logs — check the LM Studio GUI.[/]")
+            else:
+                self._update_stats()
 
     def on_input_changed(self, event: Input.Changed) -> None:
         if event.input.id == "log-filter":

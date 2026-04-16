@@ -61,15 +61,16 @@ class ServerCard(Widget):
         self._server_type = server_type
 
     def compose(self) -> ComposeResult:
-        yield Label("", id=f"{self._server_type}-card-header", classes="card-header")
-        yield Label("", id=f"{self._server_type}-card-state")
-        yield Label("", id=f"{self._server_type}-card-model", classes="card-detail")
-        yield Label("", id=f"{self._server_type}-card-port", classes="card-detail")
-        yield Label("", id=f"{self._server_type}-card-uptime", classes="card-detail")
+        t = self._server_type
+        yield Label(t.upper(), id=f"{t}-card-header", classes="card-header")
+        yield Label("[white]? Connecting…[/]", id=f"{t}-card-state")
+        yield Label("", id=f"{t}-card-model",  classes="card-detail")
+        yield Label("", id=f"{t}-card-port",   classes="card-detail")
+        yield Label("", id=f"{t}-card-uptime", classes="card-detail")
         with Widget(classes="card-buttons"):
-            yield Button("Start",   id=f"{self._server_type}-btn-start",   variant="success")
-            yield Button("Stop",    id=f"{self._server_type}-btn-stop",    variant="error")
-            yield Button("Restart", id=f"{self._server_type}-btn-restart", variant="warning")
+            yield Button("Start",   id=f"{t}-btn-start",   variant="success")
+            yield Button("Stop",    id=f"{t}-btn-stop",    variant="error")
+            yield Button("Restart", id=f"{t}-btn-restart", variant="warning")
 
     def watch_server_info(self, info: ServerInfo | None) -> None:
         if info is None:
