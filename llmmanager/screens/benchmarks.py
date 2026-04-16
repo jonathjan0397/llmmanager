@@ -151,6 +151,7 @@ class BenchmarksScreen(Widget):
                         options=[
                             ("Ollama",    "ollama"),
                             ("vLLM",      "vllm"),
+                            ("LM Studio", "lmstudio"),
                             ("llama.cpp", "llamacpp"),
                         ],
                         value="ollama",
@@ -224,6 +225,7 @@ class BenchmarksScreen(Widget):
                         options=[
                             ("Ollama",    "ollama"),
                             ("vLLM",      "vllm"),
+                            ("LM Studio", "lmstudio"),
                             ("llama.cpp", "llamacpp"),
                         ],
                         value="ollama",
