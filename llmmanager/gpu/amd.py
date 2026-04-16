@@ -78,5 +78,40 @@ class AMDProvider(AbstractGPUProvider):
             ))
         return gpus
 
+    async def set_fan_speed(self, gpu_index: int, speed_pct: int) -> tuple[bool, str]:
+        speed_pct = max(0, min(100, speed_pct))
+        pwm_value = int(speed_pct / 100 * 255)
+        ok, msg = await asyncio.to_thread(self._sysfs_write, gpu_index, "pwm1_enable", "1")
+        if not ok:
+            return False, msg
+        ok, msg = await asyncio.to_thread(self._sysfs_write, gpu_index, "pwm1", str(pwm_value))
+        if ok:
+            return True, f"GPU {gpu_index}: fans set to {speed_pct}% (pwm {pwm_value})"
+        return False, msg
+
+    async def set_fan_auto(self, gpu_index: int) -> tuple[bool, str]:
+        ok, msg = await asyncio.to_thread(self._sysfs_write, gpu_index, "pwm1_enable", "2")
+        if ok:
+            return True, f"GPU {gpu_index}: fans returned to automatic control"
+        return False, msg
+
+    def _sysfs_write(self, gpu_index: int, filename: str, value: str) -> tuple[bool, str]:
+        import glob as _glob
+        import sys
+        if sys.platform == "win32":
+            return False, "AMD sysfs fan control is Linux-only."
+        pattern = f"/sys/class/drm/card{gpu_index}/device/hwmon/hwmon*/{filename}"
+        paths = _glob.glob(pattern)
+        if not paths:
+            return False, f"sysfs path not found: {pattern}"
+        try:
+            with open(paths[0], "w") as f:
+                f.write(value)
+            return True, "ok"
+        except PermissionError:
+            return False, "Permission denied — fan control requires root on Linux."
+        except Exception as exc:
+            return False, str(exc)
+
     async def shutdown(self) -> None:
         pass

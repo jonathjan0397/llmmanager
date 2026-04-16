@@ -112,6 +112,84 @@ class NvidiaProvider(AbstractGPUProvider):
         except Exception as exc:
             raise GPUQueryError(f"NVIDIA query failed: {exc}") from exc
 
+    async def set_fan_speed(self, gpu_index: int, speed_pct: int) -> tuple[bool, str]:
+        return await asyncio.to_thread(self._set_fan_sync, gpu_index, max(0, min(100, speed_pct)))
+
+    def _set_fan_sync(self, gpu_index: int, speed_pct: int) -> tuple[bool, str]:
+        import sys
+        try:
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", FutureWarning)
+                import pynvml
+            handle = pynvml.nvmlDeviceGetHandleByIndex(gpu_index)
+
+            # nvmlDeviceSetFanSpeed_v2 / nvmlDeviceSetFanControlPolicy are Linux-only
+            # and not available in the Windows NVML driver.
+            if sys.platform == "win32":
+                return False, (
+                    "Fan control via NVML is not available on Windows. "
+                    "Use MSI Afterburner or your GPU vendor's software instead."
+                )
+
+            try:
+                num_fans = pynvml.nvmlDeviceGetNumFans(handle)
+            except Exception:
+                num_fans = 1
+
+            NVML_FAN_POLICY_MANUAL = 0
+            for fan_idx in range(num_fans):
+                pynvml.nvmlDeviceSetFanControlPolicy(handle, fan_idx, NVML_FAN_POLICY_MANUAL)
+                pynvml.nvmlDeviceSetFanSpeed_v2(handle, fan_idx, speed_pct)
+
+            return True, f"GPU {gpu_index}: fans set to {speed_pct}%"
+        except AttributeError:
+            return False, (
+                "pynvml version does not support fan writes. "
+                "Upgrade: pip install --upgrade nvidia-ml-py"
+            )
+        except Exception as exc:
+            msg = str(exc)
+            if "Insufficient Permissions" in msg or "NOT_SUPPORTED" in msg:
+                return False, (
+                    f"Permission denied — fan control requires root on Linux. "
+                    f"Run: sudo llmmanager  (or grant nvidia-persistenced access)"
+                )
+            return False, f"NVML error: {msg}"
+
+    async def set_fan_auto(self, gpu_index: int) -> tuple[bool, str]:
+        return await asyncio.to_thread(self._set_fan_auto_sync, gpu_index)
+
+    def _set_fan_auto_sync(self, gpu_index: int) -> tuple[bool, str]:
+        import sys
+        try:
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", FutureWarning)
+                import pynvml
+            handle = pynvml.nvmlDeviceGetHandleByIndex(gpu_index)
+
+            if sys.platform == "win32":
+                return False, "Fan control via NVML is not available on Windows."
+
+            try:
+                num_fans = pynvml.nvmlDeviceGetNumFans(handle)
+            except Exception:
+                num_fans = 1
+
+            NVML_FAN_POLICY_TEMPERATURE_CONTINOUS_SW = 1
+            for fan_idx in range(num_fans):
+                pynvml.nvmlDeviceSetFanControlPolicy(
+                    handle, fan_idx, NVML_FAN_POLICY_TEMPERATURE_CONTINOUS_SW
+                )
+
+            return True, f"GPU {gpu_index}: fans returned to automatic control"
+        except AttributeError:
+            return False, "pynvml version does not support fan writes."
+        except Exception as exc:
+            msg = str(exc)
+            if "Insufficient Permissions" in msg or "NOT_SUPPORTED" in msg:
+                return False, "Permission denied — fan control requires root on Linux."
+            return False, f"NVML error: {msg}"
+
     async def shutdown(self) -> None:
         await asyncio.to_thread(self._shutdown_sync)
 
