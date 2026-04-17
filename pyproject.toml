@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "llmmanager"
-version = "0.1.18"
+version = "0.1.19"
 description = "TUI control panel for LLM server stacks (Ollama, vLLM, llama.cpp, LM Studio)"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -52,8 +52,6 @@ dependencies = [
     "platformdirs>=4.0.0",
     # Async file I/O (used by log tailer)
     "aiofiles>=23.0.0",
-    # MLPerf loadgen scheduler (falls back to built-in scheduler if unavailable)
-    "mlperf-loadgen>=4.0",
 ]
 
 [project.urls]
