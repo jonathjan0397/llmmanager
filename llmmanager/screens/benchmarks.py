@@ -107,6 +107,11 @@ class BenchmarksScreen(Widget):
         padding: 0 1;
     }
 
+    #mlperf-config-scroll {
+        height: auto;
+        max-height: 18;
+    }
+
     #mlperf-model-row {
         height: auto;
         margin-bottom: 1;
@@ -220,87 +225,90 @@ class BenchmarksScreen(Widget):
             # ── MLPerf ───────────────────────────────────────────────────
             with TabPane("MLPerf", id="tab-mlperf"):
                 with Vertical(id="mlperf-form"):
-                    yield Label("Server:", classes="form-label")
-                    yield Select(
-                        options=[
-                            ("Ollama",    "ollama"),
-                            ("vLLM",      "vllm"),
-                            ("LM Studio", "lmstudio"),
-                            ("llama.cpp", "llamacpp"),
-                        ],
-                        value="ollama",
-                        id="mlperf-server-select",
-                    )
-                    yield Label("Model:", classes="form-label")
-                    yield Select(
-                        options=[("—", "__none__")],
-                        value="__none__",
-                        id="mlperf-model-select",
-                    )
-                    with Horizontal(id="mlperf-model-row"):
-                        yield Button("↻ Refresh", id="btn-mlperf-refresh-models", variant="default")
-                    yield Label("Scenario:", classes="form-label")
-                    yield Select(
-                        options=[
-                            ("SingleStream  (latency — sequential queries)",          "SingleStream"),
-                            ("Offline       (throughput — all queries at once)",      "Offline"),
-                            ("Server        (Poisson arrival — latency under load)",  "Server"),
-                        ],
-                        value="SingleStream",
-                        id="mlperf-scenario-select",
-                    )
-                    yield Label("Samples (# queries):", classes="form-label")
-                    yield Select(
-                        options=[
-                            ("8   (quick test)", "8"),
-                            ("24  (standard)",   "24"),
-                            ("50  (extended)",   "50"),
-                            ("100 (full)",       "100"),
-                        ],
-                        value="24",
-                        id="mlperf-samples-select",
-                    )
-                    yield Label("Max output tokens per query:", classes="form-label")
-                    yield Select(
-                        options=[
-                            ("64",  "64"),
-                            ("128", "128"),
-                            ("256", "256"),
-                            ("512", "512"),
-                        ],
-                        value="128",
-                        id="mlperf-tokens-select",
-                    )
-                    yield Label("Server target QPS  [Server scenario only]:", classes="form-label")
-                    yield Select(
-                        options=[
-                            ("0.5 QPS", "0.5"),
-                            ("1.0 QPS", "1.0"),
-                            ("2.0 QPS", "2.0"),
-                            ("4.0 QPS", "4.0"),
-                        ],
-                        value="1.0",
-                        id="mlperf-qps-select",
-                    )
-                    yield Static(
-                        "[dim]SLOs — SingleStream: 90th-pct E2E < 2000 ms  |  "
-                        "Offline: TPS ≥ 10  |  "
-                        "Server: 99th-pct TTFT < 2000 ms AND TPOT < 200 ms\n"
-                        "Prompts: 25-item Open ORCA / HumanEval / GSM8K set "
-                        "(MLPerf Inference v4.0 open-division LLM workloads)[/]",
-                        id="mlperf-hints",
-                    )
-                    if MLPerfRunner.loadgen_available():
-                        yield Static(
-                            "[green]mlperf_loadgen detected — official scheduler active.[/]",
-                            id="mlperf-loadgen-status",
+                    # Config in a scrollable section so the Run button is always visible
+                    with VerticalScroll(id="mlperf-config-scroll"):
+                        yield Label("Server:", classes="form-label")
+                        yield Select(
+                            options=[
+                                ("Ollama",    "ollama"),
+                                ("vLLM",      "vllm"),
+                                ("LM Studio", "lmstudio"),
+                                ("llama.cpp", "llamacpp"),
+                            ],
+                            value="ollama",
+                            id="mlperf-server-select",
                         )
-                    else:
-                        yield Static(
-                            "[yellow]mlperf_loadgen not installed[/]  "
-                            "[dim]— pip install mlperf-loadgen for certified results[/]",
-                            id="mlperf-loadgen-status",
+                        yield Label("Model:", classes="form-label")
+                        yield Select(
+                            options=[("—", "__none__")],
+                            value="__none__",
+                            id="mlperf-model-select",
                         )
+                        with Horizontal(id="mlperf-model-row"):
+                            yield Button("↻ Refresh", id="btn-mlperf-refresh-models", variant="default")
+                        yield Label("Scenario:", classes="form-label")
+                        yield Select(
+                            options=[
+                                ("SingleStream  (latency — sequential queries)",          "SingleStream"),
+                                ("Offline       (throughput — all queries at once)",      "Offline"),
+                                ("Server        (Poisson arrival — latency under load)",  "Server"),
+                            ],
+                            value="SingleStream",
+                            id="mlperf-scenario-select",
+                        )
+                        yield Label("Samples (# queries):", classes="form-label")
+                        yield Select(
+                            options=[
+                                ("8   (quick test)", "8"),
+                                ("24  (standard)",   "24"),
+                                ("50  (extended)",   "50"),
+                                ("100 (full)",       "100"),
+                            ],
+                            value="24",
+                            id="mlperf-samples-select",
+                        )
+                        yield Label("Max output tokens per query:", classes="form-label")
+                        yield Select(
+                            options=[
+                                ("64",  "64"),
+                                ("128", "128"),
+                                ("256", "256"),
+                                ("512", "512"),
+                            ],
+                            value="128",
+                            id="mlperf-tokens-select",
+                        )
+                        yield Label("Server target QPS  [Server scenario only]:", classes="form-label")
+                        yield Select(
+                            options=[
+                                ("0.5 QPS", "0.5"),
+                                ("1.0 QPS", "1.0"),
+                                ("2.0 QPS", "2.0"),
+                                ("4.0 QPS", "4.0"),
+                            ],
+                            value="1.0",
+                            id="mlperf-qps-select",
+                        )
+                        yield Static(
+                            "[dim]SLOs — SingleStream: 90th-pct E2E < 2000 ms  |  "
+                            "Offline: TPS ≥ 10  |  "
+                            "Server: 99th-pct TTFT < 2000 ms AND TPOT < 200 ms\n"
+                            "Prompts: 25-item Open ORCA / HumanEval / GSM8K set "
+                            "(MLPerf Inference v4.0 open-division LLM workloads)[/]",
+                            id="mlperf-hints",
+                        )
+                        if MLPerfRunner.loadgen_available():
+                            yield Static(
+                                "[green]mlperf_loadgen detected — official scheduler active.[/]",
+                                id="mlperf-loadgen-status",
+                            )
+                        else:
+                            yield Static(
+                                "[yellow]mlperf_loadgen not installed[/]  "
+                                "[dim]— pip install llmmanager[benchmarks] for certified results[/]",
+                                id="mlperf-loadgen-status",
+                            )
+                    # Run controls always visible outside the scroll area
                     with Horizontal(id="mlperf-run-controls"):
                         yield Button("Run MLPerf", id="btn-mlperf-run",    variant="primary")
                         yield Button("Cancel",     id="btn-mlperf-cancel", variant="error",
