@@ -153,9 +153,9 @@ install_app() {
     info "Installing ${APP_NAME}..."
     if pipx list 2>/dev/null | grep -q "$APP_NAME"; then
         info "Upgrading existing installation..."
-        pipx install "git+${REPO}" --force
+        pipx install "git+${REPO}" --force --pip-args="--no-cache-dir"
     else
-        pipx install "git+${REPO}"
+        pipx install "git+${REPO}" --pip-args="--no-cache-dir"
     fi
     success "${APP_NAME} installed."
 }
