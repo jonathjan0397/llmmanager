@@ -153,8 +153,7 @@ install_app() {
     info "Installing ${APP_NAME}..."
     if pipx list 2>/dev/null | grep -q "$APP_NAME"; then
         info "Upgrading existing installation..."
-        pipx upgrade "$APP_NAME" 2>/dev/null || \
-            pipx install "git+${REPO}" --force
+        pipx install "git+${REPO}" --force
     else
         pipx install "git+${REPO}"
     fi
