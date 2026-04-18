@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 
-from llmmanager.models.gpu import GPUInfo, GPUVendor
+from llmmanager.models.gpu import GPUInfo, GPUProcess, GPUVendor
 
 
 class AbstractGPUProvider(ABC):
@@ -30,6 +30,10 @@ class AbstractGPUProvider(ABC):
     async def shutdown(self) -> None:
         """Clean up resources (e.g. nvmlShutdown)."""
         ...
+
+    async def get_processes(self) -> list[GPUProcess]:
+        """Return running GPU processes across all devices. Default: not supported."""
+        return []
 
     async def set_fan_speed(self, gpu_index: int, speed_pct: int) -> tuple[bool, str]:
         """

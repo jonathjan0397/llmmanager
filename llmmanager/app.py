@@ -7,7 +7,7 @@ from pathlib import Path
 
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.widgets import Footer, Header, Tab, TabbedContent, TabPane
+from textual.widgets import Footer, Header, TabbedContent, TabPane
 
 from llmmanager.config.manager import ConfigManager
 from llmmanager.constants import APP_DISPLAY_NAME, APP_VERSION
@@ -19,6 +19,7 @@ from llmmanager.screens.chat import ChatScreen
 from llmmanager.screens.dashboard import DashboardScreen
 from llmmanager.screens.logs import LogsScreen
 from llmmanager.screens.model_mgmt import ModelManagementScreen
+from llmmanager.screens.gpu import GPUScreen
 from llmmanager.screens.profiles import ProfilesScreen
 from llmmanager.screens.server_mgmt import ServerManagementScreen
 from llmmanager.screens.setup_wizard import SetupWizardScreen
@@ -43,10 +44,12 @@ class LLMManagerApp(App):
         Binding("6", "switch_tab('profiles')",     "Profiles",     show=True),
         Binding("7", "switch_tab('api')",          "API Panel",    show=True),
         Binding("8", "switch_tab('chat')",         "Chat",         show=True),
+        Binding("9", "switch_tab('gpu')",          "GPU",          show=True),
         Binding("f1",  "show_help",     "Help",     show=False),
         Binding("f5",  "force_refresh", "Refresh",  show=False),
         Binding("f10", "quit",          "Quit",     show=True),
         Binding("n",   "show_notifs",   "Notifs",   show=False),
+        Binding("p",   "toggle_poll",   "Pause Poll", show=False),
         Binding("q",   "quit",          "Quit",     show=False),
     ]
 
@@ -84,6 +87,8 @@ class LLMManagerApp(App):
                 yield APIPanelScreen()
             with TabPane("Chat",       id="chat"):
                 yield ChatScreen()
+            with TabPane("GPU",        id="gpu"):
+                yield GPUScreen()
         yield Footer()
 
     async def on_mount(self) -> None:
@@ -97,10 +102,10 @@ class LLMManagerApp(App):
         self.notif_manager = NotificationManager(cfg)
         await self.poller.start()
         await self.download_manager.start()
-        for server in self.registry.all_enabled():
-            self.log_tailer.start_server(server)
+        # Log tailers are started explicitly when the user starts a server,
+        # not automatically on launch, so we don't initiate LLM connections
+        # before the user has configured and started them.
         self._notif_task = asyncio.create_task(self._process_notifications())
-        self.run_worker(self._check_first_run(), exclusive=False)
 
     async def on_unmount(self) -> None:
         await self.poller.stop()
@@ -151,6 +156,13 @@ class LLMManagerApp(App):
 
     def action_force_refresh(self) -> None:
         self.run_worker(self.poller.force_poll())
+
+    def action_toggle_poll(self) -> None:
+        if self.poller is None:
+            return
+        paused = self.poller.toggle_pause()
+        state = "paused" if paused else "resumed"
+        self.notify(f"Polling {state}.", title="Poller")
 
     def action_show_notifs(self) -> None:
         count = self.notif_manager.unread_count if self.notif_manager else 0

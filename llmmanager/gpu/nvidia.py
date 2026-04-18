@@ -7,7 +7,7 @@ import warnings
 
 from llmmanager.exceptions import GPUQueryError
 from llmmanager.gpu.base import AbstractGPUProvider
-from llmmanager.models.gpu import GPUInfo, GPUVendor, VRAMInfo
+from llmmanager.models.gpu import GPUInfo, GPUProcess, GPUVendor, VRAMInfo
 
 
 class NvidiaProvider(AbstractGPUProvider):
@@ -111,6 +111,34 @@ class NvidiaProvider(AbstractGPUProvider):
             return gpus
         except Exception as exc:
             raise GPUQueryError(f"NVIDIA query failed: {exc}") from exc
+
+    async def get_processes(self) -> list[GPUProcess]:
+        return await asyncio.to_thread(self._query_processes_sync)
+
+    def _query_processes_sync(self) -> list[GPUProcess]:
+        import psutil
+        try:
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", FutureWarning)
+                import pynvml
+            count = pynvml.nvmlDeviceGetCount()
+            results: list[GPUProcess] = []
+            for i in range(count):
+                handle = pynvml.nvmlDeviceGetHandleByIndex(i)
+                try:
+                    procs = pynvml.nvmlDeviceGetComputeRunningProcesses(handle)
+                except Exception:
+                    procs = []
+                for p in procs:
+                    try:
+                        name = psutil.Process(p.pid).name()
+                    except Exception:
+                        name = "unknown"
+                    vram_mb = (p.usedGpuMemory or 0) / 1024**2
+                    results.append(GPUProcess(pid=p.pid, name=name, vram_mb=vram_mb, gpu_index=i))
+            return results
+        except Exception:
+            return []
 
     async def set_fan_speed(self, gpu_index: int, speed_pct: int) -> tuple[bool, str]:
         return await asyncio.to_thread(self._set_fan_sync, gpu_index, max(0, min(100, speed_pct)))

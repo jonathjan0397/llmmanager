@@ -289,6 +289,10 @@ class ServerManagementScreen(Widget):
         else:
             await self._lifecycle(server.start, "Starting…")
 
+        # Attach log tailer now that the server is running (lazy — not on app start)
+        app: LLMManagerApp = self.app  # type: ignore[assignment]
+        app.log_tailer.start_server(server)
+
         model = server.config.default_model
         if not model:
             return

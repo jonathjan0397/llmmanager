@@ -41,3 +41,11 @@ class GPUInfo:
     fan_speed_pct: float | None = None
     driver_version: str | None = None
     cuda_version: str | None = None
+
+
+@dataclass
+class GPUProcess:
+    pid: int
+    name: str
+    vram_mb: float
+    gpu_index: int
