@@ -395,11 +395,11 @@ class ModelManagementScreen(Widget):
             case "btn-unload":
                 self.run_worker(self._do_unload_selected())
             case "btn-delete":
-                await self._do_delete_selected()
+                self.run_worker(self._do_delete_selected())
             case "btn-installed-refresh":
                 self.run_worker(self._load_installed())
             case "btn-ollama-download":
-                await self._enqueue_ollama_download()
+                self.run_worker(self._enqueue_ollama_download())
             case "btn-ollama-refresh":
                 self._ollama_lib_loaded = False
                 self.run_worker(self._load_ollama_library(

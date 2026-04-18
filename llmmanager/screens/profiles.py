@@ -72,7 +72,7 @@ class ProfilesScreen(Widget):
             case "btn-load-profile":
                 self._load_selected_profile()
             case "btn-delete-profile":
-                await self._delete_selected_profile()
+                self.run_worker(self._delete_selected_profile())
 
     def _save_current_as_profile(self) -> None:
         app: LLMManagerApp = self.app  # type: ignore[assignment]
