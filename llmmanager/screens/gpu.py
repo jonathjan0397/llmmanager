@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from textual.app import ComposeResult
-from textual.containers import ScrollableContainer, Vertical
+from textual.containers import ScrollableContainer
 from textual.widget import Widget
 from textual.widgets import DataTable, Label, ProgressBar
 
@@ -19,20 +19,22 @@ class GPUScreen(Widget):
     DEFAULT_CSS = """
     GPUScreen { width: 1fr; height: 1fr; }
 
-    #gpu-detail-scroll { height: 1fr; }
-
-    .gpu-card {
-        border: ascii $primary-darken-2;
-        background: $surface-darken-1;
-        padding: 1;
-        margin-bottom: 1;
+    /* Scrollable row of cards — horizontal scroll when > 3 GPUs */
+    #gpu-cards-scroll {
         height: auto;
+        max-height: 18;
+        overflow-x: auto;
+        overflow-y: hidden;
     }
 
-    .gpu-card-title { text-style: bold; color: $text; margin-bottom: 1; }
-    .gpu-stat-row   { height: 1; }
-    .gpu-stat-label { width: 18; color: $text-muted; }
-    .gpu-bar        { width: 1fr; }
+    #gpu-cards-container {
+        layout: grid;
+        grid-size: 3;
+        grid-columns: 1fr 1fr 1fr;
+        grid-gutter: 1;
+        width: 1fr;
+        height: auto;
+    }
 
     #gpu-procs-heading { margin-top: 1; }
     #gpu-procs-table   { height: 1fr; }
@@ -40,9 +42,8 @@ class GPUScreen(Widget):
 
     def compose(self) -> ComposeResult:
         yield Label("GPU Utilization", classes="section-heading")
-        with ScrollableContainer(id="gpu-detail-scroll"):
-            with Vertical(id="gpu-cards-container"):
-                pass
+        with ScrollableContainer(id="gpu-cards-scroll"):
+            yield Widget(id="gpu-cards-container")
         yield Label("Running GPU Processes", id="gpu-procs-heading", classes="section-heading")
         yield DataTable(id="gpu-procs-table", cursor_type="row")
 
@@ -59,7 +60,7 @@ class GPUScreen(Widget):
         if snapshot is None:
             return
 
-        container = self.query_one("#gpu-cards-container")
+        container = self.query_one("#gpu-cards-container", Widget)
 
         for gpu in snapshot.gpus:
             card_id = f"gpu-card-{gpu.index}"
@@ -92,8 +93,8 @@ class _GPUCard(Widget):
         border: ascii $primary-darken-2;
         background: $surface-darken-1;
         padding: 1;
-        margin-bottom: 1;
         height: auto;
+        min-width: 30;
     }
     _GPUCard Label { height: 1; }
     """
