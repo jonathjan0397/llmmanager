@@ -50,7 +50,7 @@ class GPUScreen(Widget):
     def on_mount(self) -> None:
         table = self.query_one("#gpu-procs-table", DataTable)
         table.add_columns("GPU", "PID", "Process", "VRAM (MB)")
-        self.set_interval(2.0, self._refresh)
+        self.set_interval(1.0, self._refresh)
 
     async def _refresh(self) -> None:
         app: LLMManagerApp = self.app  # type: ignore[assignment]
@@ -122,15 +122,13 @@ class _GPUCard(Widget):
         self.query_one(f"#gc-util-lbl-{i}", Label).update(
             f"Utilization   {util:.1f}%"
         )
-        util_bar = self.query_one(f"#gc-util-bar-{i}", ProgressBar)
-        util_bar.advance(util - (util_bar.progress or 0))
+        self.query_one(f"#gc-util-bar-{i}", ProgressBar).update(progress=util)
 
         vram_pct = gpu.vram.used_pct
         self.query_one(f"#gc-vram-lbl-{i}", Label).update(
             f"VRAM          {gpu.vram.used_mb:.0f} / {gpu.vram.total_mb:.0f} MB  ({vram_pct:.1f}%)"
         )
-        vram_bar = self.query_one(f"#gc-vram-bar-{i}", ProgressBar)
-        vram_bar.advance(vram_pct - (vram_bar.progress or 0))
+        self.query_one(f"#gc-vram-bar-{i}", ProgressBar).update(progress=vram_pct)
 
         parts: list[str] = []
         if gpu.temperature_c is not None:

@@ -108,7 +108,7 @@ class AppConfig(BaseModel):
     version: int = 1
     """Schema version — used by ConfigManager to apply migrations."""
 
-    poll_interval_ms: int = 2000
+    poll_interval_ms: int = 1000
     log_tail_lines: int = 500
     theme: Literal["dark", "light"] = "dark"
     active_profile: str | None = None
