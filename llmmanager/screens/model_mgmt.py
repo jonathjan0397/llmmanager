@@ -39,6 +39,13 @@ class ModelManagementScreen(Widget):
     }
     .model-action-bar Button { width: 1fr; }
 
+    #disk-usage-bar {
+        height: 1;
+        padding: 0 1;
+        background: $surface-darken-1;
+        margin-bottom: 1;
+    }
+
     #download-bar {
         height: 1;
         padding: 0 1;
@@ -108,6 +115,7 @@ class ModelManagementScreen(Widget):
         with TabbedContent(id="model-tabs"):
             # ---- Installed ------------------------------------------------
             with TabPane("Installed", id="tab-installed"):
+                yield Static("", id="disk-usage-bar")
                 yield Input(placeholder="Filter models...", id="installed-search")
                 yield DataTable(id="installed-table", cursor_type="row")
                 with Horizontal(classes="model-action-bar"):
@@ -224,12 +232,14 @@ class ModelManagementScreen(Widget):
     # ------------------------------------------------------------------
 
     async def _load_installed(self, query: str = "") -> None:
+        import shutil
         from llmmanager.hub.cloud_models import get_cloud_models
         app: LLMManagerApp = self.app  # type: ignore[assignment]
         table = self.query_one("#installed-table", DataTable)
         table.clear()
         q = query.lower()
         cfg = app.config_manager.config
+        total_model_gb = 0.0
 
         # Local models from running servers
         for server in app.registry.all_enabled():
@@ -239,9 +249,11 @@ class ModelManagementScreen(Widget):
                     if q and q not in m.display_name.lower():
                         continue
                     ctx = f"{m.context_length // 1000}k" if m.context_length else "?"
+                    size_gb = m.size_gb or 0.0
+                    total_model_gb += size_gb
                     table.add_row(
                         m.display_name,
-                        f"{m.size_gb:.1f} GB" if m.size_gb else "?",
+                        f"{size_gb:.1f} GB" if m.size_gb else "?",
                         ctx,
                         server.display_name,
                         "[bold green]LOCAL[/]",
@@ -269,6 +281,22 @@ class ModelManagementScreen(Widget):
                 "[bold blue]CLOUD[/]",
                 key=f"cloud:{m.source.value}:{m.model_id}",
             )
+
+        # Update disk usage bar
+        try:
+            import pathlib
+            du = shutil.disk_usage(pathlib.Path.home())
+            free_gb = du.free / 1024**3
+            total_gb = du.total / 1024**3
+            used_pct = (du.used / du.total * 100) if du.total else 0
+            bar = self.query_one("#disk-usage-bar", Static)
+            bar.update(
+                f"[dim]Models on disk:[/] [cyan]{total_model_gb:.1f} GB[/]   "
+                f"[dim]Disk free:[/] [{'red' if free_gb < 5 else 'green'}]{free_gb:.1f} GB[/]"
+                f"[dim] / {total_gb:.0f} GB  ({used_pct:.0f}% used)[/]"
+            )
+        except Exception:
+            pass
 
     async def _load_ollama_library(self, query: str = "") -> None:
         from llmmanager.hub.ollama_library import search_models
@@ -369,20 +397,25 @@ class ModelManagementScreen(Widget):
     # ------------------------------------------------------------------
 
     def _get_installed_selection(self) -> tuple["AbstractServer", str] | None:
-        """Return (server, model_id) for the selected installed row. None for cloud rows."""
+        """Return (server, model_id) for the selected installed row. None for cloud/no-selection rows."""
         app: LLMManagerApp = self.app  # type: ignore[assignment]
         table = self.query_one("#installed-table", DataTable)
         if table.cursor_row is None:
             return None
-        row = table.get_row_at(table.cursor_row)
-        row_type = str(row[4])  # "LOCAL" or "CLOUD" (markup stripped by Textual display)
-        model_name = str(row[0])
-        provider = str(row[3])
-        server = next(
-            (s for s in app.registry.all_enabled() if s.display_name == provider),
-            None,
-        )
-        return (server, model_name) if server else None
+        try:
+            row_key, _ = table.coordinate_to_cell_key(table.cursor_coordinate)
+            key_str = str(row_key)
+        except Exception:
+            return None
+        # Keys: "server_name:model_id" for local, "cloud:provider:model_id" for cloud
+        if key_str.startswith("cloud:"):
+            return None
+        parts = key_str.split(":", 1)
+        if len(parts) != 2:
+            return None
+        server_name, model_id = parts
+        server = app.registry.get(server_name)
+        return (server, model_id) if server else None
 
     # ------------------------------------------------------------------
     # Button handler
